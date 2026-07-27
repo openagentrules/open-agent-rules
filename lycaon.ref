@@ -1,0 +1,4 @@
+# The engine revision this generated mirror tracks. CI checks out this ref and
+# runs `codegen-oar-spec --standard . --check` against it, so a drifted mirror
+# fails before it can be published.
+ref: main

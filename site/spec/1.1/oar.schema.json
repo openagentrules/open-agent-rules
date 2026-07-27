@@ -1,0 +1,254 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openagentrules.org/spec/1.1/oar.schema.json",
+  "title": "OpenAgentRule",
+  "description": "Open Agent Rules (OAR) rule document. An OAR rule is an Anchor Binding with effect block|transform (or OAR Decision refinements warn|nudge|allow) plus hint copy fields. Normative spec: https://openagentrules.org/spec/1.1/. Does not redefine on/selector — those come from the Binding grammar. The document world is closed: any key neither branch declares is rejected, except x- extensions ([OAR-DOC-20]).",
+  "allOf": [
+    {
+      "$ref": "anchor-binding.schema.json"
+    },
+    {
+      "type": "object",
+      "required": [
+        "spec_version",
+        "id",
+        "kind",
+        "effect"
+      ],
+      "properties": {
+        "spec_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+$",
+          "description": "OAR spec version this document targets. This engine accepts \"1.0\" and \"1.1\"; an unsupported major fails closed at load ([OAR-DOC-3]).",
+          "enum": [
+            "1.0",
+            "1.1"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Stable rule id — equals the hints/<CODE>.yaml directory/file stem (SCREAMING_SNAKE)."
+        },
+        "namespace": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$",
+          "description": "Publisher scope. Rule identity is (namespace, id); absent means the loading host's own scope. The rendered Code: line stays the bare id ([OAR-DOC-21], [OAR-DOC-22])."
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Deprecated alias of id. Accepted only when spec_version is \"1.0\"; rejected at 1.1 and later ([OAR-DOC-25]).",
+          "deprecated": true
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable short title."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "schema",
+            "invariant",
+            "policy",
+            "detector"
+          ],
+          "description": "Formal tier. Ordering on Emit: schema → policy → invariant → detector, then id lexical."
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "block",
+            "warn",
+            "info"
+          ],
+          "description": "UI/telemetry severity only. Never affects selection, evaluation, ordering, precedence, or the returned decision ([OAR-DOC-7])."
+        },
+        "effect": {
+          "type": "string",
+          "enum": [
+            "block",
+            "warn",
+            "nudge",
+            "allow",
+            "transform"
+          ],
+          "description": "OAR Decision effect. Binding bus effect remains inform|block|transform; warn|nudge|allow refine block-class Decisions. transform mutates content in place (content-safety series)."
+        },
+        "enforcement": {
+          "type": "string",
+          "enum": [
+            "enforce",
+            "monitor"
+          ],
+          "default": "enforce",
+          "description": "monitor evaluates + telemetry only — never acts (no block/nudge/transform/on_fire)."
+        },
+        "mandatory": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, cannot be disabled by overlay/pack/caller."
+        },
+        "on_error": {
+          "type": "string",
+          "description": "fail_closed | fail_open | <CODE> when a fact provider or detector errors.",
+          "default": "fail_closed"
+        },
+        "on_fire": {
+          "type": "array",
+          "description": "Closed vocabulary of engine side-effects run when the rule fires. CEL never mutates state.",
+          "items": {
+            "$ref": "#/$defs/onFireAction"
+          },
+          "uniqueItems": true
+        },
+        "flow": {
+          "type": "array",
+          "description": "Optional multi-step sequence (Invariant-style ->) over recent ToolCall/Message.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "stream": {
+          "type": "string",
+          "enum": [
+            "buffered",
+            "chunk"
+          ],
+          "default": "buffered",
+          "description": "Streaming evaluation mode for output/tool_result Anchors. Default buffered."
+        },
+        "emit": {
+          "type": "string",
+          "description": "Provenance channel (guard:*, rule:*). Kept from hint.yaml."
+        },
+        "references": {
+          "$ref": "#/$defs/references"
+        },
+        "detector": {
+          "$ref": "#/$defs/detector"
+        },
+        "what": {
+          "type": "string"
+        },
+        "cause": {
+          "type": "string"
+        },
+        "why": {
+          "type": "string"
+        },
+        "fix": {
+          "type": "string"
+        },
+        "instead": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "context_schema": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "scenarios": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Deprecated top-level tool filter — prefer selector.tools. Still accepted and treated as selector.tools when that is absent ([OAR-DOC-19]).",
+          "deprecated": true
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "requires_facts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "Facts this rule needs. A host that does not provide one rejects the rule at load, naming both ([OAR-PROF-6])."
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "portable",
+            "host"
+          ],
+          "description": "Informational record of the author's intent. Carries no behaviour — portability is determined by the anchor and the facts ([OAR-DOC-24])."
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "onFireAction": {
+      "type": "string",
+      "enum": [
+        "increment_counter",
+        "reset_counter",
+        "publish_event",
+        "increment_breaker",
+        "reset_breaker"
+      ],
+      "description": "Closed on_fire vocabulary. Schema is SSOT — do not hand-maintain a parallel Go AllOnFire list (Track 190 polarity). Optional thin Go consts only as sugar with schema⊇const drift."
+    },
+    "references": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "owasp_llm": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "OWASP LLM Top 10 tags (e.g. LLM01). Telemetry/docs only."
+        },
+        "mitre_atlas": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "MITRE ATLAS technique tags. Telemetry/docs only."
+        }
+      }
+    },
+    "detector": {
+      "type": "object",
+      "description": "Present iff kind is detector. Condition delegated to the detector seam.",
+      "required": [
+        "ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "type": "string",
+          "pattern": "^detector://.+",
+          "description": "Registered detector URI (detector://<name>)."
+        }
+      }
+    }
+  },
+  "type": "object",
+  "patternProperties": {
+    "^x-": {
+      "description": "Implementation extension. Ignored by other implementations ([OAR-DOC-20])."
+    }
+  },
+  "unevaluatedProperties": false
+}
+ 

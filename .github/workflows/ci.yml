@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  immutability:
+    name: published versions are immutable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: bash scripts/freeze-spec.sh 1.1
+
+  drift:
+    name: generated mirror matches the engine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: standard }
+      - id: ref
+        run: echo "ref=$(sed -n 's/^ref: *//p' standard/lycaon.ref)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: paintedwolf-ai/lycaon
+          ref: ${{ steps.ref.outputs.ref }}
+          path: engine
+      - uses: actions/setup-go@v5
+        with: { go-version-file: engine/lycaon/go.mod }
+      - name: check drift
+        working-directory: engine/lycaon
+        run: go run ./cmd/codegen-oar-spec --standard "$GITHUB_WORKSPACE/standard" --check
+
+  reference:
+    name: reference implementation passes the corpus
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: npm ci
+        working-directory: packages/oar-ref
+      - run: npx tsc --noEmit
+        working-directory: packages/oar-ref
+      - run: npm test
+        working-directory: packages/oar-ref
+      - name: no runtime dependencies
+        working-directory: packages/oar-ref
+        run: |
+          count=$(npm ls --omit=dev --parseable --all | tail -n +2 | wc -l)
+          if [ "$count" -ne 0 ]; then
+            echo "error: oar-ref must have zero runtime dependencies, found $count" >&2
+            npm ls --omit=dev >&2
+            exit 1
+          fi

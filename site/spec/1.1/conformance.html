@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conformance — Open Agent Rules 1.1</title>
+<link rel="canonical" href="https://openagentrules.org/">
+<style>
+:root { --fg:#191512; --bg:#fbf8f4; --muted:#6a6058; --rule:#e2d9cd; --link:#8a4b1f; --code:#f2ece3; }
+@media (prefers-color-scheme: dark) {
+  :root { --fg:#ece5dc; --bg:#17140f; --muted:#a0968a; --rule:#332c23; --link:#e0a170; --code:#221d16; }
+}
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.65 ui-serif, Georgia, serif; }
+header { display:flex; flex-wrap:wrap; gap:1rem 1.5rem; align-items:baseline;
+  padding:1rem 1.5rem; border-bottom:1px solid var(--rule); }
+.brand { font-weight:700; text-decoration:none; color:var(--fg); }
+nav { display:flex; flex-wrap:wrap; gap:1rem; font:600 14px/1 ui-sans-serif, system-ui, sans-serif; }
+nav a { color:var(--muted); text-decoration:none; }
+nav a.here, nav a:hover { color:var(--link); }
+main { max-width:46rem; margin:0 auto; padding:2rem 1.5rem 4rem; }
+h1,h2,h3,h4 { line-height:1.25; font-family:ui-sans-serif, system-ui, sans-serif; }
+h1 { font-size:1.9rem; margin:0 0 1rem; }
+h2 { font-size:1.35rem; margin:2.5rem 0 .75rem; padding-top:.75rem; border-top:1px solid var(--rule); }
+h3 { font-size:1.1rem; margin:1.75rem 0 .5rem; }
+h4 { font-size:1rem; margin:1.25rem 0 .5rem; }
+a { color:var(--link); }
+p.lede { font-size:1.15rem; }
+ul.jump { list-style:none; padding:0; display:flex; flex-wrap:wrap; gap:1rem; font-weight:600; }
+code { background:var(--code); padding:.1em .35em; border-radius:3px;
+  font:0.88em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; word-break:break-word; }
+pre { background:var(--code); padding:1rem; border-radius:6px; overflow-x:auto; }
+pre code { background:none; padding:0; }
+code.url { user-select:all; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.94rem; }
+th, td { text-align:left; vertical-align:top; padding:.5rem .6rem; border-bottom:1px solid var(--rule); }
+th { font:600 13px/1.4 ui-sans-serif, system-ui, sans-serif; color:var(--muted); }
+.scroll, .table-scroll { overflow-x:auto; }
+blockquote { margin:1rem 0; padding-left:1rem; border-left:3px solid var(--rule); color:var(--muted); }
+footer { border-top:1px solid var(--rule); padding:1.5rem; color:var(--muted); font-size:.85rem; }
+footer p { max-width:46rem; margin:0 auto; }
+</style>
+</head>
+<body>
+<header><a class="brand" href="/">Open Agent Rules</a><nav><a href="/">Overview</a><a href="/spec/1.1/">Specification</a><a href="/spec/1.1/schemas.html">Schemas</a><a href="/spec/1.1/conformance.html" class="here">Conformance</a></nav></header>
+<main>
+<h1>Conformance</h1>
+<h2>Run the corpus against your implementation</h2>
+<p>Fetch the index, fetch each fixture it names, and run each one: load the <code>rule</code>, apply the <code>input</code>, and compare against <code>expected</code>. An implementation claiming conformance passes every fixture whose clauses fall inside the profiles it declares, and reports the ones it skipped.</p>
+<pre><code>curl https://openagentrules.org/spec/1.1/conformance/manifest.json</code></pre>
+<h2>The runner algorithm</h2>
+<p>The requirements below define the evaluation algorithm end to end. Each step is separately identified so a conformance fixture can cite it.</p>
+<ul>
+<li><strong>[OAR-CONF-1]</strong> Load each rule document and validate it against the published OAR schema. An engine MUST reject a document that fails validation, naming the failing field.</li>
+<li><strong>[OAR-CONF-2]</strong> An engine MUST reject a document whose <code>spec_version</code> major is unsupported, before any other processing of that document.</li>
+<li><strong>[OAR-CONF-3]</strong> An engine MUST resolve <code>on</code>: a core anchor identifier through the anchor profile map, any other value as a host-native anchor identifier.</li>
+<li><strong>[OAR-CONF-4]</strong> An engine MUST reject a rule whose <code>requires_facts</code> are not all provided by the host.</li>
+<li><strong>[OAR-CONF-5]</strong> An engine MUST type-check <code>when</code> against the declared fact environment and MUST reject the rule on an unknown identifier or a type error.</li>
+<li><strong>[OAR-CONF-6]</strong> At an anchor occurrence, an engine MUST select the rules whose resolved <code>on</code> matches and whose selector clauses all match.</li>
+<li><strong>[OAR-CONF-7]</strong> An engine MUST assemble the facts the selected rules reference. A fact provider failure MUST be handled per the rule&#39;s <code>on_error</code>.</li>
+<li><strong>[OAR-CONF-8]</strong> An engine MUST evaluate <code>when</code>. A rule with neither <code>when</code> nor <code>flow</code> fires whenever it is selected.</li>
+<li><strong>[OAR-CONF-9]</strong> An engine MUST record but not act on a rule whose <code>enforcement</code> is <code>monitor</code>: no effect, no side-effect, no short-circuit.</li>
+<li><strong>[OAR-CONF-10]</strong> An engine MUST order evaluation by <code>kind</code> then <code>id</code>, and the first enforced rule firing with <code>block</code> or <code>transform</code> MUST short-circuit the occurrence.</li>
+<li><strong>[OAR-CONF-11]</strong> An engine MUST apply decision precedence: <code>block</code>, then <code>nudge</code>, then <code>warn</code>, otherwise allow.</li>
+<li><strong>[OAR-CONF-12]</strong> An engine MUST apply the <code>on_fire</code> actions of every rule that fired and was enforced.</li>
+</ul>
+<h2>Fixtures (0)</h2>
+<div class="scroll">
+<table>
+<thead><tr><th>Fixture</th><th>Covers</th><th>What it proves</th></tr></thead>
+<tbody>
+</tbody>
+</table>
+</div>
+
+</main>
+<footer><p>Specification text CC BY 4.0. Schemas, corpus, and code Apache-2.0.
+Anyone may implement this specification, for any purpose, without permission, notification, or fee.</p></footer>
+</body>
+</html>
