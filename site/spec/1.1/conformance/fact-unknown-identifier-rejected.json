@@ -1,0 +1,27 @@
+{
+  "id": "fact-unknown-identifier-rejected",
+  "title": "A condition referencing an undeclared fact is rejected at load, naming it",
+  "covers": [
+    "OAR-FACT-2",
+    "OAR-CONF-5"
+  ],
+  "rule": {
+    "spec_version": "1.1",
+    "id": "GHOST_IDENTIFIER",
+    "kind": "policy",
+    "on": "tool.pre_invoke",
+    "selector": {},
+    "effect": "block",
+    "emit": "rule:conformance",
+    "when": "ghost_fact"
+  },
+  "input": {
+    "anchor": "tool.pre_invoke",
+    "facts": {
+      "tool": "read"
+    }
+  },
+  "expected": {
+    "error": "ghost_fact"
+  }
+}

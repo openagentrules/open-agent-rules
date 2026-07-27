@@ -204,8 +204,9 @@ narrows a rule to a subset of the occurrences of that moment.
   identifier that is not a declared fact or a declared observation function, naming the
   identifier. A mistyped fact name is a load failure, never a runtime default.
 - **[OAR-FACT-3]** An engine MUST reject at load a rule whose condition is not type-correct
-  against the declared environment, and MUST reject a condition that does not evaluate to a
-  boolean.
+  against the declared environment, and MUST reject a condition whose result type is not
+  boolean. A rejection for a non-boolean result MUST name the type the condition produced and
+  the word `bool`, so the author can see what the expression actually is.
 - **[OAR-FACT-4]** A fact is an *observation*, never a *verdict*. A fact provider MUST NOT
   publish a value that encodes a policy conclusion.
 - **[OAR-FACT-5]** A fact MUST NOT bake in a threshold, and MUST NOT combine other facts in
@@ -331,12 +332,14 @@ that profile.
 - **[OAR-OPS-1]** `enforcement: monitor` MUST evaluate the rule and record the outcome while
   producing no effect and applying no side-effect. It is the rollout path for a rule an
   operator is not yet ready to enforce.
-- **[OAR-OPS-2]** When a fact provider or detector fails while a rule is being evaluated and
-  the rule's `on_error` is `fail_closed`, an engine MUST produce a `block` decision carrying
-  that rule's identifier, and MUST NOT continue evaluating later rules at the occurrence.
-- **[OAR-OPS-3]** When `on_error` is `fail_open`, an engine MUST record the failure and
-  continue: the rule contributes no decision and no side-effect.
-- **[OAR-OPS-4]** When `on_error` names a rule identifier, an engine MUST produce a `block`
+- **[OAR-OPS-2]** A rule *cannot be evaluated* when a fact provider fails, a detector fails,
+  or its condition raises at run time. When a rule cannot be evaluated and its `on_error` is
+  `fail_closed`, an engine MUST produce a `block` decision carrying that rule's identifier,
+  and MUST NOT continue evaluating later rules at the occurrence.
+- **[OAR-OPS-3]** When a rule cannot be evaluated and its `on_error` is `fail_open`, an engine
+  MUST record the failure and continue: the rule contributes no decision and no side-effect.
+- **[OAR-OPS-4]** When a rule cannot be evaluated and its `on_error` names a rule identifier,
+  an engine MUST produce a `block`
   decision carrying that substituted identifier instead of the rule's own, and MUST NOT
   continue evaluating later rules at the occurrence. The substitution replaces the
   identifier only; the effect is `block`.
@@ -458,20 +461,40 @@ identified so a conformance fixture can cite it.
 ### 9.2 Fixture shape
 
 - **[OAR-CONF-13]** A conformance fixture is a JSON object with `rule`, `input`, and
-  `expected`. `rule` is a rule document or a list of rule documents; `input` carries the
-  `anchor` and a `facts` map; `expected` describes the outcome the engine MUST produce.
+  `expected`. `rule` is a rule document or a list of rule documents. `input` carries the
+  `anchor` at which the occurrence happens and a `facts` map, and MAY carry `recent_tools`
+  (the recent activity window `flow` matches against), `session_id` (the scope counters are
+  keyed by), and `profile` (an anchor profile map). `expected` describes the outcome the
+  engine MUST produce.
+- **[OAR-CONF-19]** When `input.profile` is present, an engine running the fixture MUST
+  resolve the fixture's `on` values through that map instead of its own, and MUST otherwise
+  behave exactly as it would for its own map. A fixture whose outcome depends on which core
+  anchors a host supports MUST carry one — without it the fixture asks every implementation a
+  different question, which the corpus promises never to do.
 - **[OAR-CONF-14]** A fixture MUST carry an `id` equal to its file name stem and a non-empty
   `covers` list of clause identifiers defined by this specification.
-- **[OAR-CONF-15]** `expected` MAY carry `decision`, `code`, `on_fire`, `applied`,
-  `counters`, and `error`. `error` asserts a load-time rejection and matches when the
-  engine's error names the given text. An engine MUST NOT be required to match error
-  wording beyond the given substring.
+- **[OAR-CONF-15]** `expected` MAY carry any of six keys, and a fixture asserts only the ones
+  it is about. `decision` is the effect the occurrence resolves to, or `none` when nothing
+  actionable is produced. `code` is the identifier the decision carries. `on_fire` lists the
+  side-effects the winning rule declared. `applied` is the ordered applied-rules trace, each
+  entry written `<rule id>:<outcome>` with the outcome one of `fired`, `passed`, `errored`,
+  `monitor`. `counters` maps a rule identifier to the counter values expected after the
+  occurrence. `error` asserts a load-time rejection and matches when the engine's error
+  contains the given text; an engine MUST NOT be required to match error wording beyond that
+  substring. An engine MUST reject a fixture carrying any other `expected` key rather than
+  passing it silently.
 - **[OAR-CONF-16]** An implementation claiming conformance MUST pass every fixture in the
   published corpus whose clauses fall within the profiles it declares, and MUST report which
   fixtures it skipped and why.
 - **[OAR-CONF-17]** Every fixture in the published corpus MUST use core anchors and facts of
   `core` or `standard` tier only, so that a fixture can be run by an implementation that
   models no host-specific state.
+- **[OAR-CONF-18]** Three detector references are reserved for the corpus, and an engine
+  running it MUST provide all three: `detector://noop` reports no findings; `detector://error`
+  always fails, which is how a fixture reaches the `on_error` path; and `detector://fixture`
+  reports no findings of its own, leaving the detector facts the fixture supplied in place,
+  which is how a fixture proves the rule owns the threshold. None of the three requires a
+  model or a network.
 
 ---
 

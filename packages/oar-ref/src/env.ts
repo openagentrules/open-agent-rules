@@ -1,0 +1,126 @@
+// The declared fact environment. Names, types, and tiers are transcribed from
+// the published core-fact, core-function, and standard-profile tables in the
+// specification, section 5. The environment is closed: a condition naming
+// anything not in here is rejected at load, never evaluated as a default.
+
+export type CelType =
+  | 'bool'
+  | 'int'
+  | 'double'
+  | 'string'
+  | 'list<string>'
+  | 'list<struct>'
+  | 'struct';
+
+export type Tier = 'core' | 'standard' | 'host';
+
+export interface FactDecl {
+  readonly type: CelType;
+  readonly tier: Tier;
+  readonly profile?: string;
+}
+
+export interface FunctionDecl {
+  readonly arg: CelType;
+  readonly returns: CelType;
+  readonly tier: Tier;
+  readonly profile?: string;
+}
+
+/** Core facts — every conforming engine provides these. */
+export const CORE_FACTS: Readonly<Record<string, FactDecl>> = {
+  tool: { type: 'string', tier: 'core' },
+  tool_args: { type: 'struct', tier: 'core' },
+  tool_args_fingerprint: { type: 'string', tier: 'core' },
+  arg_validation_errors: { type: 'list<string>', tier: 'core' },
+  profile: { type: 'string', tier: 'core' },
+  session_posture: { type: 'string', tier: 'core' },
+  path_denied: { type: 'bool', tier: 'core' },
+  not_found: { type: 'bool', tier: 'core' },
+  is_directory: { type: 'bool', tier: 'core' },
+  policy_denied: { type: 'bool', tier: 'core' },
+  breaker_count: { type: 'int', tier: 'core' },
+  same_code_reject_run: { type: 'int', tier: 'core' },
+};
+
+/** Standard profile: content-safety. Provided whole or not at all. */
+export const CONTENT_SAFETY_FACTS: Readonly<Record<string, FactDecl>> = {
+  prompt_injection_score: { type: 'double', tier: 'standard', profile: 'content-safety' },
+  jailbreak_score: { type: 'double', tier: 'standard', profile: 'content-safety' },
+  pii_entities: { type: 'list<struct>', tier: 'standard', profile: 'content-safety' },
+  secret_matches: { type: 'list<struct>', tier: 'standard', profile: 'content-safety' },
+};
+
+/** Standard profile: mcp. */
+export const MCP_FACTS: Readonly<Record<string, FactDecl>> = {
+  mcp_server_id: { type: 'string', tier: 'standard', profile: 'mcp' },
+  mcp_tool_name: { type: 'string', tier: 'standard', profile: 'mcp' },
+  mcp_qualified_tool: { type: 'string', tier: 'standard', profile: 'mcp' },
+  mcp_server_configured: { type: 'bool', tier: 'standard', profile: 'mcp' },
+  mcp_server_enabled: { type: 'bool', tier: 'standard', profile: 'mcp' },
+  mcp_call_ok: { type: 'bool', tier: 'standard', profile: 'mcp' },
+  mcp_error_code: { type: 'string', tier: 'standard', profile: 'mcp' },
+  mcp_schema_matched: { type: 'bool', tier: 'standard', profile: 'mcp' },
+};
+
+export const CORE_FUNCTIONS: Readonly<Record<string, FunctionDecl>> = {
+  path_outside_scope: { arg: 'string', returns: 'bool', tier: 'core' },
+};
+
+export const MCP_FUNCTIONS: Readonly<Record<string, FunctionDecl>> = {
+  mcp_server_configured: { arg: 'string', returns: 'bool', tier: 'standard', profile: 'mcp' },
+  mcp_server_enabled: { arg: 'string', returns: 'bool', tier: 'standard', profile: 'mcp' },
+  mcp_has_field: { arg: 'string', returns: 'bool', tier: 'standard', profile: 'mcp' },
+  mcp_field_bool: { arg: 'string', returns: 'bool', tier: 'standard', profile: 'mcp' },
+  mcp_field_string: { arg: 'string', returns: 'string', tier: 'standard', profile: 'mcp' },
+  mcp_field_int: { arg: 'string', returns: 'int', tier: 'standard', profile: 'mcp' },
+};
+
+export interface Environment {
+  readonly facts: Readonly<Record<string, FactDecl>>;
+  readonly functions: Readonly<Record<string, FunctionDecl>>;
+  readonly profiles: readonly string[];
+}
+
+/**
+ * The environment this implementation declares: the core vocabulary plus both
+ * standard profiles. It publishes no host facts of its own, so every rule it
+ * accepts is portable by construction.
+ */
+export function referenceEnvironment(): Environment {
+  return {
+    facts: { ...CORE_FACTS, ...CONTENT_SAFETY_FACTS, ...MCP_FACTS },
+    functions: { ...CORE_FUNCTIONS, ...MCP_FUNCTIONS },
+    profiles: ['content-safety', 'mcp'],
+  };
+}
+
+/** The eight core anchor ids, in specification order. */
+export const CORE_ANCHORS = [
+  'tool.pre_invoke',
+  'tool.handler',
+  'tool.post_invoke',
+  'agent.post_turn',
+  'agent.finalize',
+  'model.input',
+  'model.output',
+  'model.tool_result',
+] as const;
+
+export type CoreAnchor = (typeof CORE_ANCHORS)[number];
+
+export interface AnchorProfile {
+  readonly version: string;
+  readonly core: Readonly<Record<string, string>>;
+  readonly unsupported: readonly string[];
+}
+
+/**
+ * This implementation's anchor profile map. It is a reference host, so every
+ * core anchor maps to itself and none is unsupported.
+ */
+export function referenceAnchorProfile(): AnchorProfile {
+  const core: Record<string, string> = {};
+  for (const id of CORE_ANCHORS) core[id] = id;
+  return { version: '1.1', core, unsupported: [] };
+}

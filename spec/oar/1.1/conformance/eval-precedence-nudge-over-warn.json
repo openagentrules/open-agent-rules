@@ -1,0 +1,40 @@
+{
+  "id": "eval-precedence-nudge-over-warn",
+  "title": "A nudge outranks a warn when no rule blocked",
+  "covers": [
+    "OAR-EVAL-4",
+    "OAR-CONF-11"
+  ],
+  "rule": [
+    {
+      "spec_version": "1.1",
+      "id": "A_WARNS",
+      "kind": "schema",
+      "on": "tool.pre_invoke",
+      "selector": {},
+      "effect": "warn",
+      "emit": "rule:conformance",
+      "when": "tool == \"read\""
+    },
+    {
+      "spec_version": "1.1",
+      "id": "B_NUDGES",
+      "kind": "policy",
+      "on": "tool.pre_invoke",
+      "selector": {},
+      "effect": "nudge",
+      "emit": "rule:conformance",
+      "when": "tool == \"read\""
+    }
+  ],
+  "input": {
+    "anchor": "tool.pre_invoke",
+    "facts": {
+      "tool": "read"
+    }
+  },
+  "expected": {
+    "decision": "nudge",
+    "code": "B_NUDGES"
+  }
+}
