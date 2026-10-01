@@ -1,0 +1,4 @@
+{
+  "_note": "The versions that have been published to openagentrules.org. A version listed here is immutable: site/_headers serves it with a one-year immutable cache and adopters' $ref chains and validator caches hold those URLs indefinitely, so a byte change to one is a silent interoperability break, and a correction ships as a new version instead. Each entry records {version, spec_tree_sha256, site_tree_sha256}; scripts/freeze-spec.sh --publish <v> writes an entry (the one-way door), and scripts/freeze-spec.sh verifies every entry's trees against the recorded hashes, enforcing nothing against a version that is not listed.",
+  "published": []
+}

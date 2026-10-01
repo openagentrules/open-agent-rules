@@ -1,0 +1,25 @@
+# The host this pack assumes: a model gateway that runs a category-scoring
+# classifier and a personal-data detector over model output, and nothing else.
+# It has no file system and dispatches no tools, so it claims neither profile —
+# which is the whole point of declaring capabilities rather than stubbing them.
+oar_capability_version: "1.0"
+host: example.moderation-gateway
+anchors:
+  core:
+    model.input: model.input
+    model.output: model.output
+  unsupported:
+    - tool.pre_invoke
+    - tool.handler
+    - tool.post_invoke
+    - agent.post_turn
+    - agent.finalize
+    - model.tool_result
+profiles: [session, content, pii, moderation]
+activity_window: 0
+detectors:
+  - detector://noop
+  - detector://error
+  - detector://fixture
+expression_nodes_max: 1024
+supports_transform: true

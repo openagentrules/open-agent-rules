@@ -1,0 +1,59 @@
+# A category-threshold filter, the shape every hosted moderation product ships.
+#
+# The classifier reports a score per category; the rule owns the bar and the
+# exemption. Both of those are the parts an operator argues about, so both are
+# here in the document rather than in the classifier's configuration.
+oar: "1.0"
+id: HATE_HIGH
+namespace: example.moderation
+kind: detector
+anchor: model.output
+requires:
+  profiles: [moderation]
+detector:
+  ref: detector://fixture
+when: 'moderation_score("hate") >= 0.7'
+effect: block
+status: stable
+references:
+  owasp_llm: [LLM01]
+copy:
+  title: Hateful content
+  what: The response scored above the bar for the hate category.
+---
+# The same category at a lower bar, reported rather than refused. Two rules
+# rather than one field with three values, because "warn here, block there" is
+# a policy and policies are documents.
+oar: "1.0"
+id: HATE_ELEVATED
+namespace: example.moderation
+kind: detector
+anchor: model.output
+requires:
+  profiles: [moderation]
+detector:
+  ref: detector://fixture
+when: 'moderation_score("hate") >= 0.4 && moderation_score("hate") < 0.7'
+effect: warn
+status: stable
+copy:
+  what: The response scored in the elevated band for the hate category.
+---
+# An exemption that a hosted product usually cannot express at all: the same
+# bar, relaxed for an internal posture. The condition says so in one line where
+# a reviewer can read it.
+oar: "1.0"
+id: VIOLENCE_HIGH
+namespace: example.moderation
+kind: detector
+anchor: model.output
+requires:
+  profiles: [moderation, session]
+detector:
+  ref: detector://fixture
+when: 'moderation_score("violence") >= 0.7 && session_posture != "internal"'
+effect: block
+status: stable
+copy:
+  what: The response scored above the bar for the violence category.
+  fix: Internal sessions are exempt; this one is not.

@@ -1,0 +1,64 @@
+# PR gate. Every job is a thin wrapper around a Taskfile target, so `task check`
+# locally runs exactly these steps — a green local run means a green PR.
+# Steps mirror cloudflare-pages.yml; keep the two in lockstep.
+#
+# This repository is the source of truth for the standard. Nothing here checks
+# out or consults another repository.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  spec:
+    name: the specification tree is self-consistent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - uses: arduino/setup-task@v2
+        with: { version: 3.x, repo-token: "${{ secrets.GITHUB_TOKEN }}" }
+      - run: task spec:vocab:check
+      - run: task spec:clauses:check
+      - run: task schema:check
+      - run: task spec:coverage:check
+      - run: task spec:capability:check
+
+  site:
+    name: published site is current and well-formed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - uses: arduino/setup-task@v2
+        with: { version: 3.x, repo-token: "${{ secrets.GITHUB_TOKEN }}" }
+      - run: task site:check
+
+  reference:
+    name: reference implementation passes the corpus
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: packages/oar-ref/package-lock.json
+      - uses: arduino/setup-task@v2
+        with: { version: 3.x, repo-token: "${{ secrets.GITHUB_TOKEN }}" }
+      - run: task install
+      - run: task ref:typecheck
+      - run: task ref:test
+      - run: task ref:deps:check
+      - run: task conformance
+      - run: task pack:lint
+      - run: task differential:check

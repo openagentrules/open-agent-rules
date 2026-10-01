@@ -1,0 +1,32 @@
+# The specific rule silences the general one it refines. Without `overrides`
+# the author would have to negate DESTRUCTIVE_TOOL's whole condition inside
+# this one, which breaks silently the moment either rule changes.
+oar: "1.0"
+id: BULK_DELETE_DENIED
+namespace: example.security
+kind: policy
+anchor: tool.pre_invoke
+selector:
+  tool: [delete]
+requires:
+  profiles: [tool]
+when: '"recursive" in tool_args && tool_arg_bool("recursive")'
+effect: block
+overrides: [DESTRUCTIVE_TOOL_WARN]
+status: stable
+copy:
+  what: A recursive delete is refused outright rather than merely flagged.
+---
+oar: "1.0"
+id: DESTRUCTIVE_TOOL_WARN
+namespace: example.security
+kind: policy
+anchor: tool.pre_invoke
+selector:
+  tool: [delete, move, chmod]
+requires:
+  profiles: [tool]
+effect: warn                # no `when`: fires whenever selected
+status: stable
+copy:
+  what: This tool changes state that is awkward to restore.

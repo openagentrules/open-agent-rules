@@ -1,0 +1,25 @@
+{
+  "name": "@openagentrules/oar-ref",
+  "version": "1.0.0",
+  "description": "Reference evaluator for Open Agent Rules 1.0. Zero runtime dependencies.",
+  "license": "Apache-2.0",
+  "author": "Painted Wolf LLC",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "bin": { "oar-conformance": "./bin/oar-conformance.mjs" },
+  "files": ["dist", "bin", "src"],
+  "scripts": {
+    "build": "tsc -p .",
+    "prepack": "tsc -p .",
+    "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
+    "conformance": "npm run build && node bin/oar-conformance.mjs ../../spec/oar/1.0/conformance",
+    "lint:pack": "npm run build && node bin/oar-conformance.mjs --capability ../../examples/portable-pack/capability.yaml ../../examples/portable-pack"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "ajv": "^8.17.1",
+    "typescript": "^5.7.2"
+  }
+}

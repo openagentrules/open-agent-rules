@@ -1,0 +1,43 @@
+# The PII half of the same product: anonymise rather than refuse.
+#
+# A hosted guardrail spells this as an action per entity type — ANONYMIZE this,
+# BLOCK that. Here the detector reports spans and the rule decides, so the two
+# behaviours are two rules over the same observation rather than two values of
+# a vendor enum.
+oar: "1.0"
+id: REDACT_PII
+namespace: example.moderation
+kind: detector
+anchor: model.output
+requires:
+  profiles: [pii]
+detector:
+  ref: detector://fixture
+when: 'size(pii_entities) > 0'
+effect: transform
+transform:
+  action: redact
+  target: pii_entities
+  replacement: "[redacted]"
+status: stable
+copy:
+  what: The response carried personal data, which was removed.
+---
+# A credential is not anonymised, it is refused: the response is not delivered
+# at all. `block` discards every accumulated transform ([OAR-OPS-17]), so this
+# and the redaction above cannot half-apply.
+oar: "1.0"
+id: SECRET_REFUSED
+namespace: example.moderation
+kind: detector
+anchor: model.output
+requires:
+  profiles: [pii]
+detector:
+  ref: detector://fixture
+when: 'size(secret_matches) > 0'
+effect: block
+status: stable
+copy:
+  what: The response contained something shaped like a credential.
+  fix: Nothing is redacted here — the whole response is withheld.

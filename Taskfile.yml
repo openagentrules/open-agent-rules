@@ -1,0 +1,159 @@
+version: "3"
+
+# One command — `task check` — runs exactly what CI runs. Every CI job is a thin
+# wrapper around a target here, so a green local run means a green PR.
+#
+# This repository is the source of truth for the standard: spec/oar/ is
+# hand-authored and site/ is built from it. Differential checks can compare
+# implementations in sibling repositories or supplied host reports.
+
+vars:
+  REF_DIR: packages/oar-ref
+  SPEC_VERSION: "1.0"
+
+tasks:
+  default:
+    desc: Run the full pre-publish check (same as check)
+    cmds:
+      - task: check
+
+  dev:
+    desc: Serve site/ locally with _headers applied (./dev.sh)
+    cmds:
+      - ./dev.sh {{.CLI_ARGS}}
+
+  install:
+    desc: Install the reference implementation's dev dependencies
+    dir: "{{.REF_DIR}}"
+    cmds:
+      - npm ci
+
+  ref:build:
+    desc: Compile the reference implementation to dist/
+    dir: "{{.REF_DIR}}"
+    cmds:
+      - npm run build
+
+  ref:typecheck:
+    desc: Type-check the reference implementation without emitting
+    dir: "{{.REF_DIR}}"
+    cmds:
+      - npx tsc --noEmit
+
+  ref:test:
+    desc: Run the reference implementation's unit tests
+    dir: "{{.REF_DIR}}"
+    cmds:
+      - npm test
+
+  ref:deps:check:
+    desc: Fail if the reference implementation grew a runtime dependency
+    dir: "{{.REF_DIR}}"
+    # The zero-dependency claim is in package.json's description and in the
+    # README. It is only true if something checks — a transitive runtime dep
+    # would arrive silently with an unrelated `npm install`.
+    cmds:
+      - |
+        count=$(npm ls --omit=dev --parseable --all | tail -n +2 | wc -l | tr -d ' ')
+        if [ "$count" -ne 0 ]; then
+          echo "error: oar-ref must have zero runtime dependencies, found $count" >&2
+          npm ls --omit=dev >&2
+          exit 1
+        fi
+        echo "ok: zero runtime dependencies"
+
+  conformance:
+    desc: Run the published conformance corpus against the reference implementation
+    dir: "{{.REF_DIR}}"
+    cmds:
+      - npm run conformance
+
+  pack:lint:
+    desc: Load examples/portable-pack against the capability document it declares
+    dir: "{{.REF_DIR}}"
+    cmds:
+      - npm run lint:pack
+
+  spec:vocab:check:
+    desc: Fail if the spec's vocabulary tables drifted from vocabulary.yaml
+    cmds:
+      - node scripts/check-vocab.mjs {{.SPEC_VERSION}}
+
+  spec:clauses:check:
+    desc: Fail on a duplicate, missing, or retired clause identifier
+    cmds:
+      - node scripts/check-clauses.mjs {{.SPEC_VERSION}}
+
+  spec:clauses:write:
+    desc: Regenerate clause-index.json — only when clauses are legitimately added
+    cmds:
+      - node scripts/check-clauses.mjs --write {{.SPEC_VERSION}}
+
+  schema:check:
+    desc: Fail if a published schema is malformed, mis-$id'd, or has a dangling $ref
+    cmds:
+      - node scripts/check-schemas.mjs {{.SPEC_VERSION}}
+
+  spec:coverage:check:
+    desc: Fail if a normative MUST clause has no fixture and no written exemption
+    cmds:
+      - node scripts/check-coverage.mjs {{.SPEC_VERSION}}
+
+  # The second engine lives in its own repository and is optional when absent.
+  differential:check:
+    desc: Compare the Rust and TypeScript engines against the shared corpus
+    cmds:
+      - node scripts/check-differential.mjs {{.CLI_ARGS}}
+
+  spec:capability:check:
+    desc: Fail if a fixture declares capability it does not need (probes each dimension against the reference engine)
+    cmds:
+      - node scripts/check-capability-minimal.mjs {{.CLI_ARGS}}
+
+  release:manifest:
+    desc: Refresh the draft release manifest after changing versioned sources
+    cmds:
+      - python3 scripts/release-bundle.py --write {{.SPEC_VERSION}}
+
+  release:check:
+    desc: Verify source hashes and reproducible release packaging
+    cmds:
+      - python3 scripts/release-bundle.py --check {{.SPEC_VERSION}}
+      - python3 scripts/test-release-bundle.py
+
+  release:bundle:
+    desc: Build the verified versioned archive and SHA-256 checksum in dist/
+    cmds:
+      - python3 scripts/release-bundle.py {{.SPEC_VERSION}}
+
+  spec:freeze:check:
+    desc: Fail if an already-published version tree stopped matching its recorded hash (immutability)
+    cmds:
+      - bash scripts/freeze-spec.sh
+
+  site:build:
+    desc: Rebuild site/ from the hand-authored spec tree
+    cmds:
+      - node scripts/build-site.mjs {{.SPEC_VERSION}}
+
+  site:check:
+    desc: Build site/ and verify its JSON, links, sitemap, and _headers
+    cmds:
+      - node scripts/build-site.mjs {{.SPEC_VERSION}}
+      - node scripts/check-site.mjs
+
+  check:
+    desc: Everything CI runs, in CI order — spec gates, site, reference implementation
+    cmds:
+      - task: spec:vocab:check
+      - task: spec:clauses:check
+      - task: schema:check
+      - task: spec:coverage:check
+      - task: spec:capability:check
+      - task: site:check
+      - task: ref:typecheck
+      - task: ref:test
+      - task: ref:deps:check
+      - task: conformance
+      - task: pack:lint
+      - task: differential:check

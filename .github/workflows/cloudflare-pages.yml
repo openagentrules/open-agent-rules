@@ -1,0 +1,57 @@
+# Deploy openagentrules.org to Cloudflare Pages (Direct Upload via Wrangler).
+#
+# site/ is generated from spec/oar/ and static/_headers by `task site:build`.
+# This workflow runs all verification gates, builds site/, and deploys
+# the generated directory to Cloudflare Pages.
+#
+# Gates, in order — parity with `task check`:
+#   1. spec gates       — vocabulary, clause identifiers, schemas, coverage, capability
+#   2. site:check        — site/ builds and validates (JSON, links, sitemap, _headers)
+#   3. reference impl    — typecheck, unit tests, zero runtime deps, corpus, lint
+#
+# Required GitHub Actions secrets:
+#   CLOUDFLARE_API_TOKEN   — API token with Account → Cloudflare Pages → Edit
+#   CLOUDFLARE_ACCOUNT_ID  — Cloudflare account ID (Overview → API)
+#
+# Required GitHub Actions variable (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_PAGES_PROJECT_NAME — Pages project name in Cloudflare (exact match)
+
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: packages/oar-ref/package-lock.json
+
+      - uses: arduino/setup-task@v2
+        with: { version: 3.x, repo-token: "${{ secrets.GITHUB_TOKEN }}" }
+
+      - name: Install reference implementation dependencies
+        run: task install
+
+      - name: Check
+        run: task check
+
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
