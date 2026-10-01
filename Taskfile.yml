@@ -108,6 +108,7 @@ tasks:
   spec:capability:check:
     desc: Fail if a fixture declares capability it does not need (probes each dimension against the reference engine)
     cmds:
+      - task: ref:build
       - node scripts/check-capability-minimal.mjs {{.CLI_ARGS}}
 
   release:manifest:

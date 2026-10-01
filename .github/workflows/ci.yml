@@ -23,9 +23,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '22' }
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: packages/oar-ref/package-lock.json
       - uses: arduino/setup-task@v2
         with: { version: 3.x, repo-token: "${{ secrets.GITHUB_TOKEN }}" }
+      # spec:capability:check probes fixtures against the reference engine.
+      - run: task install
       - run: task spec:vocab:check
       - run: task spec:clauses:check
       - run: task schema:check
