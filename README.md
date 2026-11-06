@@ -10,7 +10,6 @@ capabilities the document declares it needs.
 - **Schemas** — <https://openagentrules.org/spec/1.1/schemas.html>
 - **Conformance corpus** — <https://openagentrules.org/spec/1.1/conformance.html>
 - **A worked rule pack** — <https://openagentrules.org/examples/portable-pack.html>
-- **Converting a moderation policy** — <https://openagentrules.org/examples/moderation-pack.html>
 - **The hint channel** — <https://openagentrules.org/examples/remedy-pack.html>
 
 **This repository is the standard.** The specification is hand-authored here, in
@@ -37,8 +36,6 @@ Then:
   Cedar, or a callback API, and the reasoning behind its main design choices.
 - [`examples/portable-pack/`](examples/portable-pack/) — rules that exercise most of the
   format, portable by construction.
-- [`examples/moderation-pack/`](examples/moderation-pack/) — a hosted moderation policy, of the
-  kind the large model platforms ship, rewritten as rules; what maps directly and what does not.
 - [`examples/remedy-pack/`](examples/remedy-pack/) — the hint-channel pattern: rules whose
   copy binds a host fact, and hint documents a host raises by code.
 - [`spec/oar/1.1/vocabulary.yaml`](spec/oar/1.1/vocabulary.yaml) — the vocabulary in

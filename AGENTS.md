@@ -24,7 +24,7 @@ Instructions and guidelines for AI coding assistants and contributors working in
 - `site/`: Generated static HTML and distribution tree. **Do NOT commit files in `site/` to Git**; it is ignored and built automatically during deployment and checks.
 - `packages/oar-ref`: The zero-dependency TypeScript reference runner and test harness.
 - `scripts/`: Zero-dependency Node.js and shell verification scripts.
-- `examples/`: Worked rule packs (`portable-pack`, `moderation-pack`, `remedy-pack`).
+- `examples/`: Worked rule packs (`portable-pack`, `remedy-pack`).
 
 ## 3. Engineering Disciplines & Workflow
 
