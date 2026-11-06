@@ -9,8 +9,8 @@ export type CelType =
   | 'double'
   | 'string'
   | 'list<string>'
-  | 'list<struct>'
-  | 'struct';
+  | 'list<map<string, dyn>>'
+  | 'map<string, dyn>';
 
 export type Tier = 'core' | 'standard' | 'host';
 
@@ -30,7 +30,7 @@ export interface FunctionDecl {
 /** Core facts — every conforming engine provides these. */
 export const CORE_FACTS: Readonly<Record<string, FactDecl>> = {
   tool: { type: 'string', tier: 'core' },
-  tool_args: { type: 'struct', tier: 'core' },
+  tool_args: { type: 'map<string, dyn>', tier: 'core' },
   tool_args_fingerprint: { type: 'string', tier: 'core' },
   arg_validation_errors: { type: 'list<string>', tier: 'core' },
   profile: { type: 'string', tier: 'core' },
@@ -47,8 +47,8 @@ export const CORE_FACTS: Readonly<Record<string, FactDecl>> = {
 export const CONTENT_SAFETY_FACTS: Readonly<Record<string, FactDecl>> = {
   prompt_injection_score: { type: 'double', tier: 'standard', profile: 'content-safety' },
   jailbreak_score: { type: 'double', tier: 'standard', profile: 'content-safety' },
-  pii_entities: { type: 'list<struct>', tier: 'standard', profile: 'content-safety' },
-  secret_matches: { type: 'list<struct>', tier: 'standard', profile: 'content-safety' },
+  pii_entities: { type: 'list<map<string, dyn>>', tier: 'standard', profile: 'content-safety' },
+  secret_matches: { type: 'list<map<string, dyn>>', tier: 'standard', profile: 'content-safety' },
 };
 
 /** Standard profile: mcp. */
@@ -68,8 +68,8 @@ export const CORE_FUNCTIONS: Readonly<Record<string, FunctionDecl>> = {
 };
 
 export const MCP_FUNCTIONS: Readonly<Record<string, FunctionDecl>> = {
-  mcp_server_configured: { arg: 'string', returns: 'bool', tier: 'standard', profile: 'mcp' },
-  mcp_server_enabled: { arg: 'string', returns: 'bool', tier: 'standard', profile: 'mcp' },
+  mcp_server_configured_for: { arg: 'string', returns: 'bool', tier: 'standard', profile: 'mcp' },
+  mcp_server_enabled_for: { arg: 'string', returns: 'bool', tier: 'standard', profile: 'mcp' },
   mcp_has_field: { arg: 'string', returns: 'bool', tier: 'standard', profile: 'mcp' },
   mcp_field_bool: { arg: 'string', returns: 'bool', tier: 'standard', profile: 'mcp' },
   mcp_field_string: { arg: 'string', returns: 'string', tier: 'standard', profile: 'mcp' },
@@ -93,6 +93,46 @@ export function referenceEnvironment(): Environment {
     functions: { ...CORE_FUNCTIONS, ...MCP_FUNCTIONS },
     profiles: ['content-safety', 'mcp'],
   };
+}
+
+/**
+ * Extends an environment with host-declared facts ([OAR-FACT-19]). Each entry
+ * names a fact and declares its type from the closed data-type vocabulary; a
+ * type outside the vocabulary, or a name colliding with an existing fact or
+ * function, is rejected. Host facts are tier `host`, so a rule may reach them
+ * only through `requires_facts`.
+ */
+export function withHostFacts(
+  env: Environment,
+  decls: Readonly<Record<string, string>>,
+): Environment {
+  const facts: Record<string, FactDecl> = { ...env.facts };
+  for (const [name, type] of Object.entries(decls)) {
+    if (!isCelType(type)) {
+      throw new Error(
+        `host fact ${name} declares type ${JSON.stringify(type)}, which is not in the ` +
+          'data-type vocabulary (bool, int, double, string, list<string>, map<string, dyn>, ' +
+          'list<map<string, dyn>>)',
+      );
+    }
+    if (facts[name] !== undefined || env.functions[name] !== undefined) {
+      throw new Error(`host fact ${name} collides with a declared fact or function`);
+    }
+    facts[name] = { type, tier: 'host' };
+  }
+  return { facts, functions: env.functions, profiles: env.profiles };
+}
+
+function isCelType(s: string): s is CelType {
+  return (
+    s === 'bool' ||
+    s === 'int' ||
+    s === 'double' ||
+    s === 'string' ||
+    s === 'list<string>' ||
+    s === 'map<string, dyn>' ||
+    s === 'list<map<string, dyn>>'
+  );
 }
 
 /** The eight core anchor ids, in specification order. */

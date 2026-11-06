@@ -32,9 +32,22 @@ export function evaluate(node: Node, ctx: EvalContext): Value {
     case 'list': return node.items.map((item) => evaluate(item, ctx));
     case 'ident': return factValue(node.name, ctx);
     case 'select': {
+      // A namespaced host fact is stored under its full dotted name; when the
+      // occurrence carries it, the node reads that fact rather than selecting
+      // into a map (see the matching case in load.ts). A declared flat fact
+      // reads through the same coercion and zero-value rules as an ident, so
+      // an int host fact compares as a bigint and an absent one reads as its
+      // zero value ([OAR-FACT-24], [OAR-FACT-25]).
+      const flat = `${node.target}.${node.field}`;
+      const flatDecl = ctx.env.facts[flat];
+      if (flatDecl !== undefined) {
+        const raw = ctx.facts[flat];
+        if (raw !== undefined && raw !== null) return coerce(raw as Value, flatDecl.type);
+        return zeroValue(flatDecl.type);
+      }
       const target = factValue(node.target, ctx);
       if (typeof target !== 'object' || target === null || Array.isArray(target)) {
-        throw new EvalError(`${node.target} is not a struct`);
+        throw new EvalError(`${node.target} is not a map<string, dyn>`);
       }
       // An absent field reads as the zero value of a string-typed selection,
       // matching how an absent observation reads elsewhere.
@@ -136,15 +149,20 @@ export function factValue(name: string, ctx: EvalContext): Value {
   if (!decl) throw new EvalError(`${name} is not a declared fact`);
   const raw = ctx.facts[name];
   if (raw !== undefined && raw !== null) return coerce(raw, decl.type);
-  switch (decl.type) {
+  return zeroValue(decl.type);
+}
+
+function zeroValue(type: string): Value {
+  switch (type) {
     case 'bool': return false;
     case 'int': return 0n;
     case 'double': return 0;
     case 'string': return '';
     case 'list<string>':
-    case 'list<struct>': return [];
-    case 'struct': return {};
+    case 'list<map<string, dyn>>': return [];
+    case 'map<string, dyn>': return {};
   }
+  throw new EvalError(`fact type ${type} has no zero value`);
 }
 
 // JSON has one number type, so an int fact arrives as a JS number and is
@@ -154,6 +172,14 @@ function coerce(raw: Value, type: string): Value {
     if (!Number.isInteger(raw)) throw new EvalError(`int fact received ${raw}`);
     return BigInt(raw);
   }
-  if (type === 'double' && typeof raw === 'bigint') return Number(raw);
+  if (type === 'double') {
+    // [OAR-FACT-17] A non-finite double is a fact-provider failure, never a
+    // value the engine coerces or defaults.
+    const n = typeof raw === 'bigint' ? Number(raw) : raw;
+    if (typeof n === 'number' && !Number.isFinite(n)) {
+      throw new EvalError('double fact is not finite');
+    }
+    if (typeof raw === 'bigint') return n;
+  }
   return raw;
 }

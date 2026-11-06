@@ -5,8 +5,8 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { referenceAnchorProfile, referenceEnvironment } from './env.js';
-import { loadRule, type Rule } from './load.js';
+import { referenceAnchorProfile, referenceEnvironment, withHostFacts, type Environment } from './env.js';
+import { loadHint, loadRule, type Rule } from './load.js';
 import { CounterStore, decide, type Detector, type Occurrence } from './decide.js';
 import type { Value } from './eval.js';
 
@@ -14,12 +14,17 @@ export interface Fixture {
   id: string;
   title: string;
   covers: string[];
+  /** One rule document or an array of them. */
   rule: unknown;
+  /** Hint documents loaded alongside the rules; they never perturb a decision. */
+  hints?: unknown[];
   input: {
     anchor: string;
     facts: Record<string, Value>;
     recent_tools?: string[];
     session_id?: string;
+    /** Host-declared facts, name to declared type ([OAR-FACT-19]). */
+    host_facts?: Record<string, string>;
     /** Overrides this engine's anchor profile map for the fixture. */
     profile?: { oar_profile_version: string; core: Record<string, string>; unsupported: string[] };
   };
@@ -29,6 +34,8 @@ export interface Fixture {
     on_fire?: string[];
     applied?: string[];
     counters?: Record<string, Record<string, number>>;
+    /** Rendered copy members to assert; `null` asserts the decision carries no copy. */
+    copy?: Record<string, string> | null;
     error?: string;
   };
 }
@@ -79,19 +86,22 @@ export async function loadFixtures(dir: string): Promise<Fixture[]> {
 /** Replay one fixture and report what, if anything, did not match. */
 export function runFixture(fx: Fixture): FixtureResult {
   const base = { id: fx.id, title: fx.title, covers: fx.covers };
-  const env = referenceEnvironment();
+  let env: Environment = referenceEnvironment();
   // A fixture whose outcome turns on which core anchors a host supports carries
   // its own profile map, so every implementation is asked the same question.
   const fixtureProfile = fx.input?.profile;
   const profile = fixtureProfile
     ? { version: fixtureProfile.oar_profile_version, core: fixtureProfile.core, unsupported: fixtureProfile.unsupported }
     : referenceAnchorProfile();
-  const docs = Array.isArray(fx.rule) ? fx.rule : [fx.rule];
+  const ruleDocs = Array.isArray(fx.rule) ? fx.rule : fx.rule !== undefined ? [fx.rule] : [];
+  const hintDocs = Array.isArray(fx.hints) ? fx.hints : [];
 
   let rules: Rule[] = [];
   let loadError: string | null = null;
   try {
-    rules = docs.map((doc) => loadRule(doc, { env, profile, detectors: DETECTOR_REFS }));
+    if (fx.input?.host_facts) env = withHostFacts(env, fx.input.host_facts);
+    rules = ruleDocs.map((doc) => loadRule(doc, { env, profile, detectors: DETECTOR_REFS }));
+    for (const doc of hintDocs) loadHint(doc);
   } catch (err) {
     loadError = err instanceof Error ? err.message : String(err);
   }
@@ -116,7 +126,12 @@ export function runFixture(fx: Fixture): FixtureResult {
     recentTools: fx.input.recent_tools ?? [],
     sessionID: fx.input.session_id,
   };
-  const result = decide(rules, occ, { env, detectors: RESERVED_DETECTORS }, new CounterStore());
+  let result: ReturnType<typeof decide>;
+  try {
+    result = decide(rules, occ, { env, detectors: RESERVED_DETECTORS }, new CounterStore());
+  } catch (err) {
+    return { ...base, pass: false, detail: `engine error: ${err instanceof Error ? err.message : String(err)}` };
+  }
 
   const exp = fx.expected;
   if (exp.decision !== undefined) {
@@ -146,6 +161,23 @@ export function runFixture(fx: Fixture): FixtureResult {
     const got = result.trace.map((e) => `${e.rule}:${e.outcome}`);
     if (got.join(',') !== exp.applied.join(',')) {
       return { ...base, pass: false, detail: `applied trace = [${got.join(', ')}], want [${exp.applied.join(', ')}]` };
+    }
+  }
+  if (exp.copy !== undefined) {
+    if (result.decision === null) {
+      return { ...base, pass: false, detail: 'expected rendered copy, got no decision' };
+    }
+    if (exp.copy === null) {
+      if (result.decision.copy !== undefined) {
+        return { ...base, pass: false, detail: `expected no copy, got ${JSON.stringify(result.decision.copy)}` };
+      }
+    } else {
+      for (const [member, want] of Object.entries(exp.copy)) {
+        const got = result.decision.copy?.[member];
+        if (got !== want) {
+          return { ...base, pass: false, detail: `copy ${member} = ${JSON.stringify(got ?? null)}, want ${JSON.stringify(want)}` };
+        }
+      }
     }
   }
   for (const [code, want] of Object.entries(exp.counters ?? {})) {

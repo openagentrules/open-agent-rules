@@ -12,7 +12,8 @@
   "scripts": {
     "build": "tsc -p .",
     "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
-    "conformance": "npm run build && node bin/oar-conformance.mjs ../../spec/oar/1.1/conformance"
+    "conformance": "npm run build && node bin/oar-conformance.mjs ../../spec/oar/1.1/conformance",
+    "lint:pack": "npm run build && node bin/lint-pack.mjs ../../examples"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

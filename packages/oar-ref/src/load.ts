@@ -10,6 +10,12 @@ import {
   type CelType,
   type Environment,
 } from './env.js';
+import {
+  COPY_MEMBERS,
+  copyReferences,
+  parseCopyTemplate,
+  type CopyPart,
+} from './copy.js';
 
 export class RuleLoadError extends Error {
   constructor(message: string) {
@@ -81,6 +87,8 @@ export interface Rule {
   onError: string;
   onFire: OnFireAction[];
   detectorRef: string | null;
+  /** Parsed copy members ([OAR-DOC-18], Appendix B). Empty when none. */
+  copy: Readonly<Record<string, readonly CopyPart[]>>;
 }
 
 /** Identity is the (namespace, id) pair; the rendered code stays the bare id. */
@@ -213,14 +221,158 @@ export function loadRule(doc: unknown, opts: LoadOptions): Rule {
     }
   }
 
+  const copy: Record<string, readonly CopyPart[]> = {};
+  for (const member of COPY_MEMBERS) {
+    const raw = d[member];
+    if (raw === undefined) continue;
+    if (typeof raw !== 'string') {
+      throw new RuleLoadError(`rule ${id} copy member ${member} must be a string`);
+    }
+    copy[member] = parseCopyTemplate(id, member, raw, opts.env);
+  }
+  // [OAR-COPY-5] A non-core fact named only in copy is still a fact the rule
+  // references: copy is presentation, not an exemption from the portability
+  // contract, so it must be reached through requires_facts.
+  const whenRefs = new Set<string>();
+  if (ast) conditionIdents(ast, whenRefs);
+  const requiresNames = new Set(asArray(d['requires_facts']).map(String));
+  for (const name of copyReferences(Object.values(copy).flat())) {
+    const decl = opts.env.facts[name];
+    if (!decl || decl.tier === 'core') continue;
+    if (requiresNames.has(name) || whenRefs.has(name)) continue;
+    throw new RuleLoadError(
+      `rule ${id} copy references ${name}, which is not a core fact and is not reached through requires_facts`,
+    );
+  }
+
   return {
     specVersion, id, namespace, kind, on, resolvedOn, selector, when, ast,
     flow: asArray(d['flow']).map(String),
     effect, enforcement,
     mandatory: d['mandatory'] === true,
     onError: typeof d['on_error'] === 'string' ? d['on_error'] : 'fail_closed',
-    onFire, detectorRef,
+    onFire, detectorRef, copy,
   };
+}
+
+/** Every fact name a condition references, for the [OAR-COPY-5] check. */
+function conditionIdents(node: Node, out: Set<string>): void {
+  switch (node.kind) {
+    case 'ident': out.add(node.name); break;
+    case 'select': out.add(node.target); break;
+    case 'list': for (const item of node.items) conditionIdents(item, out); break;
+    case 'unary': conditionIdents(node.operand, out); break;
+    case 'ternary':
+      conditionIdents(node.cond, out);
+      conditionIdents(node.then, out);
+      conditionIdents(node.other, out);
+      break;
+    case 'binary':
+      conditionIdents(node.left, out);
+      conditionIdents(node.right, out);
+      break;
+    case 'call': for (const arg of node.args) conditionIdents(arg, out); break;
+    default: break;
+  }
+}
+
+// --- hints (section 9) ---------------------------------------------------------
+
+// The fields a hint document may carry: the document envelope, the presentation
+// fields, and the copy members. Everything evaluation-shaped is forbidden.
+const HINT_FIELDS = new Set([
+  'spec_version', 'id', 'namespace', 'title', 'kind', 'severity', 'emit',
+  'references', 'what', 'cause', 'why', 'fix', 'instead', 'message',
+]);
+
+// The evaluation fields [OAR-HINT-1] forbids — named individually so the load
+// error can distinguish "a hint must not evaluate" from "no such field".
+const HINT_EVALUATION_FIELDS = new Set([
+  'on', 'selector', 'effect', 'when', 'flow', 'enforcement', 'mandatory',
+  'on_error', 'on_fire', 'stream', 'detector', 'requires_facts', 'tools', 'profile',
+]);
+
+export interface Hint {
+  specVersion: string;
+  id: string;
+  namespace: string;
+  kind: 'hint';
+  copy: Readonly<Record<string, string>>;
+}
+
+/**
+ * Loads a hint document (section 9). A hint is a copy publication keyed by
+ * code: it carries no evaluation fields ([OAR-HINT-1]), at least one copy
+ * member ([OAR-HINT-2]), and copy that is static — no bindings, no
+ * conditionals ([OAR-HINT-3]).
+ */
+export function loadHint(doc: unknown): Hint {
+  if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) {
+    throw new RuleLoadError('hint document must be a JSON object');
+  }
+  const d = doc as Record<string, unknown>;
+
+  const specVersion = requireString(d, 'spec_version');
+  if (!/^[0-9]+\.[0-9]+$/.test(specVersion)) {
+    throw new RuleLoadError(`spec_version ${JSON.stringify(specVersion)} is not <major>.<minor>`);
+  }
+  if (specVersion !== '1.1') {
+    throw new RuleLoadError(
+      `hint carries spec_version ${JSON.stringify(specVersion)} — hints are defined at 1.1`,
+    );
+  }
+
+  for (const key of Object.keys(d)) {
+    if (key.startsWith('x-')) continue;
+    if (!HINT_FIELDS.has(key)) {
+      if (HINT_EVALUATION_FIELDS.has(key)) {
+        throw new RuleLoadError(
+          `hint carries evaluation field ${JSON.stringify(key)} — a hint publishes copy, it does not evaluate ([OAR-HINT-1])`,
+        );
+      }
+      throw new RuleLoadError(
+        `hint carries field ${JSON.stringify(key)}, which this specification does not define ([OAR-DOC-20], [OAR-HINT-5])`,
+      );
+    }
+  }
+
+  const id = requireString(d, 'id');
+  if (!ID_RE.test(id)) {
+    throw new RuleLoadError(`hint id ${JSON.stringify(id)} is not an identifier`);
+  }
+  if (d['kind'] !== 'hint') {
+    throw new RuleLoadError(`hint ${id} carries kind ${JSON.stringify(d['kind'])}, want "hint"`);
+  }
+  const namespace = typeof d['namespace'] === 'string' ? d['namespace'] : '';
+  if (namespace !== '' && !NAMESPACE_RE.test(namespace)) {
+    throw new RuleLoadError(`hint ${id} namespace ${JSON.stringify(namespace)} is not a namespace`);
+  }
+  if (d['severity'] !== undefined &&
+      !['block', 'warn', 'info'].includes(String(d['severity']))) {
+    throw new RuleLoadError(`hint ${id} has severity ${JSON.stringify(d['severity'])}`);
+  }
+
+  const copy: Record<string, string> = {};
+  let members = 0;
+  for (const member of COPY_MEMBERS) {
+    const raw = d[member];
+    if (raw === undefined) continue;
+    if (typeof raw !== 'string') {
+      throw new RuleLoadError(`hint ${id} copy member ${member} must be a string`);
+    }
+    if (raw.includes('{{') || raw.includes('{%')) {
+      throw new RuleLoadError(
+        `hint ${id} copy member ${member} carries a binding — hint copy is static ([OAR-HINT-3])`,
+      );
+    }
+    copy[member] = raw;
+    members += 1;
+  }
+  if (members === 0) {
+    throw new RuleLoadError(`hint ${id} carries no copy member ([OAR-HINT-2])`);
+  }
+
+  return { specVersion, id, namespace, kind: 'hint', copy };
 }
 
 function resolveAnchor(id: string, on: string, profile: AnchorProfile): string {
@@ -291,12 +443,18 @@ export function checkType(node: Node, env: Environment, ruleID: string): CelType
       return decl.type;
     }
     case 'select': {
+      // A namespaced host fact (`<host>.<fact>`, [OAR-FACT-15]) is written in a
+      // condition with the same dotted spelling its declaration uses. When the
+      // environment declares the dotted name outright, the node reads that fact;
+      // otherwise the node selects into a `map<string, dyn>` ([OAR-FACT-22]).
+      const flat = env.facts[`${node.target}.${node.field}`];
+      if (flat) return flat.type;
       const decl = env.facts[node.target];
       if (!decl) {
         return fail(`condition references ${JSON.stringify(node.target)}, which is not a declared fact`);
       }
-      if (decl.type !== 'struct') {
-        return fail(`condition selects .${node.field} on ${node.target}, which is ${decl.type}, not a struct`);
+      if (decl.type !== 'map<string, dyn>') {
+        return fail(`condition selects .${node.field} on ${node.target}, which is ${decl.type}, not a map<string, dyn>`);
       }
       return 'string';
     }
@@ -352,7 +510,7 @@ function checkBinary(
       if (left !== 'bool' || right !== 'bool') return fail(`${op} applied to ${left} and ${right}`);
       return 'bool';
     case 'in':
-      if (right !== 'list<string>' && right !== 'list<struct>') {
+      if (right !== 'list<string>' && right !== 'list<map<string, dyn>>') {
         return fail(`in applied to ${right}, which is not a list`);
       }
       return 'bool';
