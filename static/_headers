@@ -1,0 +1,29 @@
+# Published schemas and fixtures are immutable per version and are fetched by
+# third-party validators, which need the schema media type and CORS to follow a
+# $ref. CORS is granted only under /spec/ — these are public, immutable,
+# non-credentialed files.
+/spec/*/*.schema.json
+  Content-Type: application/schema+json
+  Cache-Control: public, max-age=31536000, immutable
+  Access-Control-Allow-Origin: *
+
+/spec/*/conformance/*
+  Content-Type: application/json
+  Cache-Control: public, max-age=31536000, immutable
+  Access-Control-Allow-Origin: *
+
+# The machine-readable vocabulary is advertised beside the schemas and is
+# consumed the same way, so it gets the same CORS grant and cache policy.
+/spec/*/vocabulary.yaml
+  Content-Type: text/yaml; charset=utf-8
+  Cache-Control: public, max-age=31536000, immutable
+  Access-Control-Allow-Origin: *
+
+# Markdown companions are served as text, not downloads. The spec-root copies
+# change while a version is drafted, so they take a short cache.
+/spec/*.md
+  Content-Type: text/markdown; charset=utf-8
+  Cache-Control: public, max-age=3600
+/spec/*/*.md
+  Content-Type: text/markdown; charset=utf-8
+  Cache-Control: public, max-age=3600

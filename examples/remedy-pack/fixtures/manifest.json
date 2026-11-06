@@ -1,0 +1,75 @@
+{
+  "spec_version": "1.1",
+  "fixtures": [
+    {
+      "id": "hint-binding-rejected",
+      "file": "hint-binding-rejected.json",
+      "title": "A hint carrying a binding in its copy is a load error",
+      "covers": [
+        "OAR-HINT-3",
+        "OAR-HINT-5"
+      ]
+    },
+    {
+      "id": "hint-evaluation-field-rejected",
+      "file": "hint-evaluation-field-rejected.json",
+      "title": "A hint carrying an evaluation field is a load error",
+      "covers": [
+        "OAR-HINT-1",
+        "OAR-HINT-5"
+      ]
+    },
+    {
+      "id": "hints-do-not-perturb",
+      "file": "hints-do-not-perturb.json",
+      "title": "Loaded hints leave the decision and its copy untouched",
+      "covers": [
+        "OAR-HINT-6",
+        "OAR-COPY-6"
+      ]
+    },
+    {
+      "id": "retry-cap-below-threshold",
+      "file": "retry-cap-below-threshold.json",
+      "title": "A zero host fact is a value, not an absence — the rule simply does not fire",
+      "covers": [
+        "OAR-FACT-24",
+        "OAR-FACT-25",
+        "OAR-COPY-1"
+      ]
+    },
+    {
+      "id": "retry-cap-fires",
+      "file": "retry-cap-fires.json",
+      "title": "A rule binding host facts fires and renders them in copy",
+      "covers": [
+        "OAR-COPY-2",
+        "OAR-COPY-4",
+        "OAR-COPY-5",
+        "OAR-FACT-15",
+        "OAR-FACT-19"
+      ]
+    },
+    {
+      "id": "retry-cap-zero-binding",
+      "file": "retry-cap-zero-binding.json",
+      "title": "A binding at zero substitutes the zero value, not a gap",
+      "covers": [
+        "OAR-COPY-7",
+        "OAR-FACT-24",
+        "OAR-FACT-25"
+      ]
+    },
+    {
+      "id": "retry-cap-zero-conditional",
+      "file": "retry-cap-zero-conditional.json",
+      "title": "Copy reads correctly when a bound bool is at its zero value",
+      "covers": [
+        "OAR-COPY-3",
+        "OAR-COPY-7",
+        "OAR-FACT-24",
+        "OAR-FACT-25"
+      ]
+    }
+  ]
+}
