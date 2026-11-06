@@ -1,0 +1,45 @@
+# Developer Certificate of Origin (https://developercertificate.org/).
+#
+# Every commit must carry a `Signed-off-by:` trailer naming its author
+# (`git commit -s`). The DCO GitHub App reports the same check on pull
+# requests; this workflow also covers direct pushes to main, which the app
+# does not see.
+
+name: dco
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  signoff:
+    name: every commit is signed off by its author
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Check Signed-off-by trailers
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          # A new branch or the first push has no usable base: check HEAD alone.
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            range="$HEAD -1"
+          else
+            range="$BASE..$HEAD"
+          fi
+          status=0
+          for sha in $(git rev-list --no-merges $range); do
+            author="$(git show -s --format='%an <%ae>' "$sha")"
+            if ! git show -s --format='%(trailers:key=Signed-off-by,valueonly)' "$sha" | grep -qxF "$author"; then
+              echo "::error::$sha is not signed off by its author ($author). Amend with: git commit --amend -s"
+              status=1
+            fi
+          done
+          exit $status

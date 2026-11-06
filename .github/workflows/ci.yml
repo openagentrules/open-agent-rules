@@ -1,37 +1,50 @@
+# PR gate. Every job is a thin wrapper around a Taskfile target, so `task check`
+# locally runs exactly these steps — a green local run means a green PR.
+# Steps mirror cloudflare-pages.yml; keep the two in lockstep.
+#
+# This repository is the source of truth for the standard. Nothing here checks
+# out or consults another repository.
+
 name: ci
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  immutability:
-    name: published versions are immutable
+  spec:
+    name: the specification tree is self-consistent
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - run: bash scripts/freeze-spec.sh 1.1
-
-  drift:
-    name: generated mirror matches the engine
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with: { path: standard }
-      - id: ref
-        run: echo "ref=$(sed -n 's/^ref: *//p' standard/lycaon.ref)" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          repository: paintedwolf-ai/lycaon
-          ref: ${{ steps.ref.outputs.ref }}
-          path: engine
-      - uses: actions/setup-go@v5
-        with: { go-version-file: engine/lycaon/go.mod }
-      - name: check drift
-        working-directory: engine/lycaon
-        run: go run ./cmd/codegen-oar-spec --standard "$GITHUB_WORKSPACE/standard" --check
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: packages/oar-ref/package-lock.json
+      - uses: arduino/setup-task@v2
+        with: { version: 3.x, repo-token: "${{ secrets.GITHUB_TOKEN }}" }
+      - run: task install
+      - run: task spec:vocab:check
+      - run: task spec:clauses:check
+      - run: task schema:check
+      - run: task spec:coverage:check
+
+  site:
+    name: published site is current and well-formed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - uses: arduino/setup-task@v2
+        with: { version: 3.x, repo-token: "${{ secrets.GITHUB_TOKEN }}" }
+      - run: task site:check
 
   reference:
     name: reference implementation passes the corpus
@@ -39,19 +52,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '22' }
-      - run: npm ci
-        working-directory: packages/oar-ref
-      - run: npx tsc --noEmit
-        working-directory: packages/oar-ref
-      - run: npm test
-        working-directory: packages/oar-ref
-      - name: no runtime dependencies
-        working-directory: packages/oar-ref
-        run: |
-          count=$(npm ls --omit=dev --parseable --all | tail -n +2 | wc -l)
-          if [ "$count" -ne 0 ]; then
-            echo "error: oar-ref must have zero runtime dependencies, found $count" >&2
-            npm ls --omit=dev >&2
-            exit 1
-          fi
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: packages/oar-ref/package-lock.json
+      - uses: arduino/setup-task@v2
+        with: { version: 3.x, repo-token: "${{ secrets.GITHUB_TOKEN }}" }
+      - run: task install
+      - run: task ref:typecheck
+      - run: task ref:test
+      - run: task ref:deps:check
+      - run: task conformance
+      - run: task pack:lint
+      - run: task differential:check
