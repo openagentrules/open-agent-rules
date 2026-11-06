@@ -1,335 +1,185 @@
-// Evaluation of an already type-checked condition.
-//
-// [OAR-FACT-10] Condition evaluation is free of side-effects: nothing here
-// mutates state and nothing performs input or output. Every state change an
-// engine makes is one the rule declared through `on_fire`.
-//
-// The only failures reachable at run time are the three the specification names:
-// an absent map key or an out-of-range index ([OAR-EXPR-13]), division or modulo
-// by zero ([OAR-EXPR-14]), and 64-bit integer overflow ([OAR-EXPR-15]). Each
-// raises, and the rule is then handled per its `on_error`.
+// Evaluation of an already type-checked condition against a fact map. Nothing
+// here reaches outside the supplied facts: a condition cannot mutate state and
+// cannot perform input or output, so every state change an engine makes is one
+// the rule declared through on_fire.
 
 import type { Node } from './parse.js';
-import type { FactType } from './vocab.js';
+import type { Environment } from './env.js';
 
-export class ConditionRaise extends Error {
+export class EvalError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'ConditionRaise';
+    this.name = 'EvalError';
   }
 }
 
-export type Value =
-  | boolean
-  | bigint
-  | number
-  | string
-  | readonly string[]
-  | readonly Record<string, unknown>[]
-  | Record<string, unknown>;
-
-const INT_MIN = -(2n ** 63n);
-const INT_MAX = 2n ** 63n - 1n;
-
-function checkInt(v: bigint, what: string): bigint {
-  // [OAR-EXPR-15] Integer arithmetic that overflows 64 bits raises rather than wraps.
-  if (v < INT_MIN || v > INT_MAX) throw new ConditionRaise(`${what} overflows a 64-bit signed integer`);
-  return v;
-}
-
-function checkDouble(v: number, what: string): number {
-  // [OAR-EXPR-14] No arithmetic operation produces an IEEE infinity or NaN:
-  // every comparison against a non-finite value silently decides one way, and
-  // [OAR-FACT-23] has already excluded non-finite values from the type.
-  if (!Number.isFinite(v)) throw new ConditionRaise(`${what} produced a non-finite double`);
-  return v;
-}
-
-/** The zero value of a declared type, for a fact the occurrence did not report. */
-export function zeroValue(type: FactType): Value {
-  switch (type) {
-    case 'bool':
-      return false;
-    case 'int':
-      return 0n;
-    case 'double':
-      return 0;
-    case 'string':
-      return '';
-    case 'list<string>':
-      return [];
-    case 'list<map>':
-      return [];
-    case 'map':
-    case 'map<string,string>':
-      return {};
-  }
-}
+export type Value = boolean | bigint | number | string | unknown[] | Record<string, unknown> | null;
 
 export interface EvalContext {
-  /** Fact values for this occurrence, in their runtime representations. */
-  readonly facts: ReadonlyMap<string, Value>;
+  readonly facts: Readonly<Record<string, Value>>;
+  readonly env: Environment;
   /** Observation functions, keyed by name. */
-  readonly functions: ReadonlyMap<string, (arg: Value) => Value>;
+  readonly functions: Readonly<Record<string, (arg: Value) => Value>>;
 }
 
 export function evaluate(node: Node, ctx: EvalContext): Value {
   switch (node.kind) {
-    case 'bool':
-      return node.value;
-    case 'int':
-      return checkInt(node.value, 'an integer literal');
-    case 'double':
-      return node.value;
-    case 'string':
-      return node.value;
-    case 'list':
-      return node.items.map((i) => evaluate(i, ctx) as string);
-
-    case 'ident': {
-      const v = ctx.facts.get(node.name);
-      if (v === undefined) throw new ConditionRaise(`fact ${node.name} was not produced`);
-      return v;
-    }
-
-    case 'call': {
-      if (node.name === 'size') return size(evaluate(node.args[0]!, ctx));
-      if (node.name === 'starts_with' || node.name === 'ends_with' || node.name === 'contains') {
-        const s = evaluate(node.args[0]!, ctx) as string;
-        const needle = evaluate(node.args[1]!, ctx) as string;
-        if (node.name === 'starts_with') return startsWith(s, needle);
-        if (node.name === 'ends_with') return endsWith(s, needle);
-        return contains(s, needle);
+    case 'bool': return node.value;
+    case 'int': return node.value;
+    case 'double': return node.value;
+    case 'string': return node.value;
+    case 'null': return null;
+    case 'list': return node.items.map((item) => evaluate(item, ctx));
+    case 'ident': return factValue(node.name, ctx);
+    case 'select': {
+      // A namespaced host fact is stored under its full dotted name; when the
+      // occurrence carries it, the node reads that fact rather than selecting
+      // into a map (see the matching case in load.ts). A declared flat fact
+      // reads through the same coercion and zero-value rules as an ident, so
+      // an int host fact compares as a bigint and an absent one reads as its
+      // zero value ([OAR-FACT-24], [OAR-FACT-25]).
+      const flat = `${node.target}.${node.field}`;
+      const flatDecl = ctx.env.facts[flat];
+      if (flatDecl !== undefined) {
+        const raw = ctx.facts[flat];
+        if (raw !== undefined && raw !== null) return coerce(raw as Value, flatDecl.type);
+        return zeroValue(flatDecl.type);
       }
-      const fn = ctx.functions.get(node.name);
-      if (fn === undefined) throw new ConditionRaise(`observation function ${node.name} was not produced`);
+      const target = factValue(node.target, ctx);
+      if (typeof target !== 'object' || target === null || Array.isArray(target)) {
+        throw new EvalError(`${node.target} is not a map<string, dyn>`);
+      }
+      // An absent field reads as the zero value of a string-typed selection,
+      // matching how an absent observation reads elsewhere.
+      const v = (target as Record<string, unknown>)[node.field];
+      return v === undefined ? '' : (v as Value);
+    }
+    case 'call': {
+      const fn = ctx.functions[node.name];
+      if (!fn) throw new EvalError(`observation function ${node.name} is not bound`);
       return fn(evaluate(node.args[0]!, ctx));
     }
-
-    case 'index': {
-      const target = evaluate(node.target, ctx);
-      const index = evaluate(node.index, ctx);
-      if (Array.isArray(target)) {
-        const i = Number(index as bigint);
-        // [OAR-EXPR-13], [OAR-EXPR-21] Out of range raises, and a negative
-        // index is out of range like any other.
-        if (!Number.isSafeInteger(i) || i < 0 || i >= target.length) {
-          throw new ConditionRaise(`list index ${String(index)} is out of range`);
-        }
-        return target[i] as Value;
-      }
-      if (typeof target === 'object' && target !== null) {
-        const key = String(index);
-        const map = target as Record<string, unknown>;
-        // [OAR-EXPR-13] An absent key raises.
-        if (!Object.prototype.hasOwnProperty.call(map, key)) {
-          throw new ConditionRaise(`map key ${JSON.stringify(key)} is absent`);
-        }
-        return map[key] as Value;
-      }
-      throw new ConditionRaise('the index operator was applied to a scalar');
-    }
-
     case 'unary': {
-      // [OAR-EXPR-20] Retain both syntactic nodes for the least signed integer.
-      if (node.op === '-' && node.operand.kind === 'int' && node.operand.value === -INT_MIN) return INT_MIN;
       const v = evaluate(node.operand, ctx);
-      if (node.op === '!') return !(v as boolean);
-      if (typeof v === 'bigint') return checkInt(-v, 'negation');
-      return -(v as number);
+      if (node.op === '!') return !asBool(v);
+      if (typeof v === 'bigint') return -v;
+      if (typeof v === 'number') return -v;
+      throw new EvalError('unary - applied to a non-number');
     }
-
     case 'ternary':
-      // Only the taken branch is evaluated.
-      return (evaluate(node.cond, ctx) as boolean) ? evaluate(node.then, ctx) : evaluate(node.other, ctx);
-
+      return asBool(evaluate(node.cond, ctx))
+        ? evaluate(node.then, ctx)
+        : evaluate(node.other, ctx);
     case 'binary':
       return binary(node, ctx);
   }
 }
 
 function binary(node: Extract<Node, { kind: 'binary' }>, ctx: EvalContext): Value {
-  // [OAR-EXPR-5] && and || short-circuit: the right operand is not evaluated
-  // when the left decides the result. A condition can therefore guard an
-  // expensive or partial sub-expression behind a cheap one.
+  // && and || short-circuit, so the right arm is not evaluated when the left
+  // already decides the result.
   if (node.op === '&&') {
-    if (!(evaluate(node.left, ctx) as boolean)) return false;
-    return evaluate(node.right, ctx) as boolean;
+    return asBool(evaluate(node.left, ctx)) ? asBool(evaluate(node.right, ctx)) : false;
   }
   if (node.op === '||') {
-    if (evaluate(node.left, ctx) as boolean) return true;
-    return evaluate(node.right, ctx) as boolean;
+    return asBool(evaluate(node.left, ctx)) ? true : asBool(evaluate(node.right, ctx));
   }
-
   const l = evaluate(node.left, ctx);
   const r = evaluate(node.right, ctx);
-
   switch (node.op) {
+    case '==': return same(l, r);
+    case '!=': return !same(l, r);
     case 'in': {
-      const needle = l as string;
-      if (Array.isArray(r)) return (r as readonly string[]).includes(needle);
-      if (typeof r === 'object' && r !== null) {
-        return Object.prototype.hasOwnProperty.call(r as Record<string, unknown>, needle);
-      }
-      throw new ConditionRaise('in was applied to a scalar');
+      if (!Array.isArray(r)) throw new EvalError('in applied to a non-list');
+      return r.some((item) => same(item as Value, l));
     }
-    case '==':
-      return equal(l, r);
-    case '!=':
-      return !equal(l, r);
-    case '<':
-      return compare(l, r) < 0;
-    case '<=':
-      return compare(l, r) <= 0;
-    case '>':
-      return compare(l, r) > 0;
-    case '>=':
-      return compare(l, r) >= 0;
+    case '<': return compare(l, r) < 0;
+    case '<=': return compare(l, r) <= 0;
+    case '>': return compare(l, r) > 0;
+    case '>=': return compare(l, r) >= 0;
     case '+':
-      if (typeof l === 'string') return l + (r as string);
-      if (typeof l === 'bigint') return checkInt(l + (r as bigint), 'addition');
-      return checkDouble((l as number) + (r as number), 'addition');
-    case '-':
-      if (typeof l === 'bigint') return checkInt(l - (r as bigint), 'subtraction');
-      return checkDouble((l as number) - (r as number), 'subtraction');
-    case '*':
-      if (typeof l === 'bigint') return checkInt(l * (r as bigint), 'multiplication');
-      return checkDouble((l as number) * (r as number), 'multiplication');
+      if (typeof l === 'string' && typeof r === 'string') return l + r;
+      return arith(l, r, (a, b) => a + b, (a, b) => a + b);
+    case '-': return arith(l, r, (a, b) => a - b, (a, b) => a - b);
+    case '*': return arith(l, r, (a, b) => a * b, (a, b) => a * b);
     case '/':
-      if (typeof l === 'bigint') {
-        // [OAR-EXPR-14] Division by zero raises.
-        if ((r as bigint) === 0n) throw new ConditionRaise('division by zero');
-        // [OAR-EXPR-21] Integer division truncates toward zero, which is what
-        // BigInt division already does: -7n / 2n is -3n, and -7n % 2n is -1n.
-        return checkInt(l / (r as bigint), 'division');
-      }
-      if ((r as number) === 0) throw new ConditionRaise('division by zero');
-      return checkDouble((l as number) / (r as number), 'division');
+      if (typeof l === 'bigint' && r === 0n) throw new EvalError('division by zero');
+      return arith(l, r, (a, b) => a / b, (a, b) => a / b);
     case '%':
-      // [OAR-EXPR-14] Modulo by zero raises.
-      if ((r as bigint) === 0n) throw new ConditionRaise('modulo by zero');
-      return checkInt((l as bigint) % (r as bigint), 'modulo');
-    default:
-      throw new ConditionRaise(`unreachable operator ${String(node.op)}`);
+      if (typeof l === 'bigint' && r === 0n) throw new EvalError('modulo by zero');
+      return arith(l, r, (a, b) => a % b, (a, b) => a % b);
   }
 }
 
-function equal(l: Value, r: Value): boolean {
-  // [OAR-EXPR-10] int is promoted to double for a mixed comparison only.
-  // [OAR-EXPR-21] two aggregates never reach here: the type checker rejects
-  // that comparison at load.
-  if (typeof l === 'bigint' && typeof r === 'number') return Number(l) === r;
-  if (typeof l === 'number' && typeof r === 'bigint') return l === Number(r);
-  if (typeof l === 'bigint' && typeof r === 'bigint') return l === r;
-  return l === r;
+function arith(
+  l: Value, r: Value,
+  ints: (a: bigint, b: bigint) => bigint,
+  doubles: (a: number, b: number) => number,
+): Value {
+  if (typeof l === 'bigint' && typeof r === 'bigint') return ints(l, r);
+  if (typeof l === 'number' && typeof r === 'number') return doubles(l, r);
+  throw new EvalError('arithmetic applied to non-numbers of the same type');
 }
 
 function compare(l: Value, r: Value): number {
-  if (typeof l === 'string' && typeof r === 'string') {
-    // String comparison is by Unicode code point.
-    const a = [...l];
-    const b = [...r];
-    for (let i = 0; i < Math.min(a.length, b.length); i++) {
-      const x = a[i]!.codePointAt(0)!;
-      const y = b[i]!.codePointAt(0)!;
-      if (x !== y) return x < y ? -1 : 1;
-    }
-    return a.length === b.length ? 0 : a.length < b.length ? -1 : 1;
-  }
   if (typeof l === 'bigint' && typeof r === 'bigint') return l < r ? -1 : l > r ? 1 : 0;
-  const a = typeof l === 'bigint' ? Number(l) : (l as number);
-  const b = typeof r === 'bigint' ? Number(r) : (r as number);
-  return a < b ? -1 : a > b ? 1 : 0;
+  if (typeof l === 'number' && typeof r === 'number') return l < r ? -1 : l > r ? 1 : 0;
+  if (typeof l === 'string' && typeof r === 'string') return l < r ? -1 : l > r ? 1 : 0;
+  throw new EvalError('ordered comparison of values of different types');
 }
 
-function size(v: Value): bigint {
-  // [OAR-EXPR-16] On a string, size() counts Unicode code points.
-  if (typeof v === 'string') return BigInt([...v].length);
-  if (Array.isArray(v)) return BigInt((v as readonly unknown[]).length);
-  if (typeof v === 'object' && v !== null) return BigInt(Object.keys(v as Record<string, unknown>).length);
-  throw new ConditionRaise('size() was applied to a scalar');
+function same(l: Value, r: Value): boolean {
+  if (Array.isArray(l) && Array.isArray(r)) {
+    return l.length === r.length && l.every((v, i) => same(v as Value, r[i] as Value));
+  }
+  return l === r;
+}
+
+function asBool(v: Value): boolean {
+  if (typeof v !== 'boolean') throw new EvalError('expected a boolean');
+  return v;
 }
 
 /**
- * [OAR-FACT-23], [OAR-EXPR-22] A string is a sequence of Unicode code points,
- * and the three string built-ins compare over that sequence. The spread splits
- * on code points rather than UTF-16 code units, so an astral-plane character is
- * one member and a lone surrogate never matches half of one — which is exactly
- * the disagreement a host language's native operators would introduce.
+ * Read a declared fact. An absent value reads as the zero of its declared
+ * type — the host published the fact, it simply had nothing to report.
  */
-export function codePoints(s: string): string[] {
-  return [...s];
+export function factValue(name: string, ctx: EvalContext): Value {
+  const decl = ctx.env.facts[name];
+  if (!decl) throw new EvalError(`${name} is not a declared fact`);
+  const raw = ctx.facts[name];
+  if (raw !== undefined && raw !== null) return coerce(raw, decl.type);
+  return zeroValue(decl.type);
 }
 
-function prefixAt(hay: readonly string[], needle: readonly string[], at: number): boolean {
-  for (let i = 0; i < needle.length; i++) {
-    if (hay[at + i] !== needle[i]) return false;
-  }
-  return true;
-}
-
-/** [OAR-EXPR-22] True when `s` begins with `prefix`. An empty prefix matches every string. */
-export function startsWith(s: string, prefix: string): boolean {
-  const a = codePoints(s);
-  const b = codePoints(prefix);
-  if (b.length > a.length) return false;
-  return prefixAt(a, b, 0);
-}
-
-/** [OAR-EXPR-22] True when `s` ends with `suffix`. An empty suffix matches every string. */
-export function endsWith(s: string, suffix: string): boolean {
-  const a = codePoints(s);
-  const b = codePoints(suffix);
-  if (b.length > a.length) return false;
-  return prefixAt(a, b, a.length - b.length);
-}
-
-/** [OAR-EXPR-22] True when `substring` occurs anywhere in `s`. An empty substring matches every string. */
-export function contains(s: string, substring: string): boolean {
-  const a = codePoints(s);
-  const b = codePoints(substring);
-  if (b.length > a.length) return false;
-  for (let at = 0; at + b.length <= a.length; at++) {
-    if (prefixAt(a, b, at)) return true;
-  }
-  return false;
-}
-
-/** Validate a supplied observation against its declared type [OAR-FACT-26]. */
-export function validateFactValue(raw: unknown, type: string, name: string): Value {
+function zeroValue(type: string): Value {
   switch (type) {
-    case 'bool':
-      if (typeof raw !== 'boolean') throw new ConditionRaise(`fact ${name} is not a bool`);
-      return raw;
-    case 'int':
-      if ((typeof raw === 'bigint' || (typeof raw === 'number' && Number.isInteger(raw))) && BigInt(raw) >= -(1n << 63n) && BigInt(raw) < (1n << 63n)) return BigInt(raw);
-      throw new ConditionRaise(`fact ${name} is not an int`);
-    case 'double':
-      if (typeof raw !== 'number') throw new ConditionRaise(`fact ${name} is not a double`);
-      // [OAR-FACT-23] A double fact is a finite binary64: a non-finite value
-      // from a fact provider is a fact-provider failure, not a comparison that
-      // silently decides one way.
-      if (!Number.isFinite(raw)) throw new ConditionRaise(`fact ${name} is not a finite double`);
-      return raw;
-    case 'string':
-      if (typeof raw !== 'string') throw new ConditionRaise(`fact ${name} is not a string`);
-      return raw;
+    case 'bool': return false;
+    case 'int': return 0n;
+    case 'double': return 0;
+    case 'string': return '';
     case 'list<string>':
-      if (!Array.isArray(raw) || raw.some((x) => typeof x !== 'string')) {
-        throw new ConditionRaise(`fact ${name} is not a list<string>`);
-      }
-      return raw as string[];
-    case 'list<map>':
-      if (!Array.isArray(raw) || raw.some(x => typeof x !== 'object' || x === null || Array.isArray(x))) throw new ConditionRaise(`fact ${name} is not a list<map>`);
-      return raw as Record<string, unknown>[];
-    case 'map':
-    case 'map<string,string>':
-      if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-        throw new ConditionRaise(`fact ${name} is not a map`);
-      }
-      if (type === 'map<string,string>' && Object.values(raw).some(v => typeof v !== 'string')) throw new ConditionRaise(`fact ${name} is not a map<string,string>`);
-      return raw as Record<string, unknown>;
-    default:
-      throw new ConditionRaise(`fact ${name} has an undeclarable type`);
+    case 'list<map<string, dyn>>': return [];
+    case 'map<string, dyn>': return {};
   }
+  throw new EvalError(`fact type ${type} has no zero value`);
+}
+
+// JSON has one number type, so an int fact arrives as a JS number and is
+// widened to the bigint the type check reasoned about.
+function coerce(raw: Value, type: string): Value {
+  if (type === 'int' && typeof raw === 'number') {
+    if (!Number.isInteger(raw)) throw new EvalError(`int fact received ${raw}`);
+    return BigInt(raw);
+  }
+  if (type === 'double') {
+    // [OAR-FACT-17] A non-finite double is a fact-provider failure, never a
+    // value the engine coerces or defaults.
+    const n = typeof raw === 'bigint' ? Number(raw) : raw;
+    if (typeof n === 'number' && !Number.isFinite(n)) {
+      throw new EvalError('double fact is not finite');
+    }
+    if (typeof raw === 'bigint') return n;
+  }
+  return raw;
 }

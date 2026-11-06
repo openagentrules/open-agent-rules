@@ -39,11 +39,11 @@ node scripts/check-clauses.mjs --write
 
 `oar` is the format marker and the version. Its presence identifies a document as an OAR rule, and its value is `<major>.<minor>`.
 
-**Minor.** Additive only: a new optional field, a new enum member, a new capability profile, a new clause, or wording that does not change what a conforming engine does. A minor revision never removes or renames a field, never narrows an accepted value, and never changes the decision an existing valid document produces (`[OAR-VER-1]`).
+**Minor.** Additive only: a new optional field, a new enum member, a new capability profile, a new clause, or wording that does not change what a conforming engine does. A minor revision never removes or renames a field, never narrows an accepted value, and never changes the decision an existing valid document produces (`[OAR-DOC-26]`).
 
-**Major.** Anything that breaks a valid document of the current major (`[OAR-VER-2]`). An engine that does not support a major rejects the document and fails closed. It never coerces, downgrades, or guesses.
+**Major.** Anything that breaks a valid document of the current major (`[OAR-DOC-27]`). An engine that does not support a major rejects the document and fails closed. It never coerces, downgrades, or guesses.
 
-**Published versions.** Once a version is officially published (recorded in `spec/published.json`), it is treated as immutable (`[OAR-VER-3]`) so validator caches and URL references do not break. During pre-v1 working drafts, the specification remains under active development.
+**Published versions.** Once a version is officially published (recorded in `spec/published.json`), it is treated as immutable (`[OAR-DOC-28]`) so validator caches and URL references do not break. During pre-v1 working drafts, the specification remains under active development.
 
 **Multi-engine validation.** To ensure interoperability and eliminate ambiguity early, features are validated against multiple implementations: the TypeScript reference runner in this repository, alongside co-developed Rust and Go implementations. When a formal standards working group is chartered, independent implementation evidence across multiple independent organizations will guide final ratification.
 

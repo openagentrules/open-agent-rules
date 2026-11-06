@@ -1,0 +1,48 @@
+# The hint half of the remedy pattern: copy the host raises for situations the
+# guard pipeline has no fact for ([OAR-HINT-1]). A hint publishes copy keyed by
+# the code the host raises ([OAR-HINT-2]); the copy is static — no bindings
+# ([OAR-HINT-3]) — and the hint never evaluates ([OAR-HINT-1]). These four are
+# the 1.0-native shape of the painted-wolf pack's enforcement-off units.
+spec_version: "1.0"
+id: TOOL_OUTPUT_SPILL_CAPPED
+namespace: example.remedy
+kind: hint
+title: Tool output spill capped
+severity: info
+what: The tool's output was capped before it reached the model.
+cause: The host caps retained tool output so one call cannot crowd out the conversation.
+why: Uncapped output hides the part that matters and spends context on repetition.
+fix: Ask for the specific slice you need instead of the whole result.
+---
+spec_version: "1.0"
+id: TOOL_OUTPUT_TRUNCATED
+namespace: example.remedy
+kind: hint
+title: Tool output truncated
+severity: info
+what: The tool's output was cut off partway through.
+cause: The host truncates retained tool output at a size limit.
+why: The tail of a long result is usually the least informative part.
+fix: Ask for the tail explicitly, or narrow the call so the result fits.
+---
+spec_version: "1.0"
+id: WORKFLOW_PHASE_EXIT_REQUIRED
+namespace: example.remedy
+kind: hint
+title: Workflow phase exit required
+severity: info
+what: The current workflow phase must end before this action is available.
+cause: The host sequences work in phases and gates actions by phase.
+why: Acting across a phase boundary leaves the phase's own steps unfinished.
+fix: Finish the phase's remaining steps, or ask the user to move the phase forward.
+---
+spec_version: "1.0"
+id: SECRET_REDACTED_RECEIPT
+namespace: example.remedy
+kind: hint
+title: Secret redacted
+severity: info
+what: A secret was redacted from content on its way out.
+cause: The host redacts recognized secrets before content leaves the session.
+why: The redaction is a receipt, not a failure — the content is safe to use.
+fix: Continue with the redacted content; ask the user for the value by name if it is needed.

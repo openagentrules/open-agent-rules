@@ -1,83 +1,63 @@
-// Appendix A, section A.1: the frozen grammar of the condition language.
-//
-// The parser accepts exactly what the EBNF derives ([OAR-EXPR-1]).
+// Tokenizer and Pratt parser for the condition subset this implementation
+// accepts. The grammar is frozen and deliberately small: everything outside it
+// raises UnsupportedCelConstruct naming the construct and its offset, so a rule
+// that would be mis-evaluated is refused instead.
 
-export class ConditionSyntaxError extends Error {
+export class UnsupportedCelConstruct extends Error {
   constructor(
-    message: string,
+    readonly construct: string,
     readonly offset: number,
+    detail?: string,
   ) {
-    super(`${message} at offset ${offset}`);
-    this.name = 'ConditionSyntaxError';
+    super(
+      `unsupported construct ${construct} at offset ${offset}` +
+        (detail ? `: ${detail}` : ''),
+    );
+    this.name = 'UnsupportedCelConstruct';
   }
 }
 
-export type BinaryOp =
-  | '||'
-  | '&&'
-  | '=='
-  | '!='
-  | '<'
-  | '<='
-  | '>'
-  | '>='
-  | 'in'
-  | '+'
-  | '-'
-  | '*'
-  | '/'
-  | '%';
+export class CelSyntaxError extends Error {
+  constructor(message: string, readonly offset: number) {
+    super(`${message} at offset ${offset}`);
+    this.name = 'CelSyntaxError';
+  }
+}
 
 export type Node =
   | { kind: 'bool'; value: boolean; offset: number }
+  | { kind: 'null'; offset: number }
   | { kind: 'int'; value: bigint; offset: number }
   | { kind: 'double'; value: number; offset: number }
   | { kind: 'string'; value: string; offset: number }
   | { kind: 'list'; items: Node[]; offset: number }
   | { kind: 'ident'; name: string; offset: number }
+  | { kind: 'select'; target: string; field: string; offset: number }
   | { kind: 'call'; name: string; args: Node[]; offset: number }
-  | { kind: 'index'; target: Node; index: Node; offset: number }
   | { kind: 'unary'; op: '!' | '-'; operand: Node; offset: number }
   | { kind: 'binary'; op: BinaryOp; left: Node; right: Node; offset: number }
   | { kind: 'ternary'; cond: Node; then: Node; other: Node; offset: number };
 
-/** Count the nodes of a parse tree, for the [OAR-EXPR-17] limit. */
-export function countNodes(node: Node): number {
-  switch (node.kind) {
-    case 'list':
-      return 1 + node.items.reduce((n, i) => n + countNodes(i), 0);
-    case 'call':
-      return 1 + node.args.reduce((n, a) => n + countNodes(a), 0);
-    case 'index':
-      return 1 + countNodes(node.target) + countNodes(node.index);
-    case 'unary':
-      return 1 + countNodes(node.operand);
-    case 'binary':
-      return 1 + countNodes(node.left) + countNodes(node.right);
-    case 'ternary':
-      return 1 + countNodes(node.cond) + countNodes(node.then) + countNodes(node.other);
-    default:
-      return 1;
-  }
-}
+export type BinaryOp =
+  | '||' | '&&'
+  | '==' | '!=' | '<' | '<=' | '>' | '>=' | 'in'
+  | '+' | '-' | '*' | '/' | '%';
+
+// Macros and comprehension forms are named so the error can say which one.
+const MACROS = new Set(['has', 'all', 'exists', 'exists_one', 'map', 'filter']);
 
 type Token =
-  | { t: 'int'; text: string; at: number }
-  | { t: 'double'; text: string; at: number }
-  | { t: 'string'; value: string; at: number }
-  | { t: 'name'; text: string; at: number }
+  | { t: 'num'; int: boolean; text: string; at: number }
+  | { t: 'str'; value: string; at: number }
+  | { t: 'ident'; name: string; at: number }
   | { t: 'punct'; text: string; at: number }
   | { t: 'eof'; at: number };
 
-const TWO_CHAR = ['&&', '||', '==', '!=', '<=', '>='];
-const ONE_CHAR = ['(', ')', '[', ']', ',', '?', ':', '<', '>', '!', '+', '-', '*', '/', '%'];
-
-function isLetter(c: string): boolean {
-  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-}
-function isDigit(c: string): boolean {
-  return c >= '0' && c <= '9';
-}
+const PUNCT = [
+  '&&', '||', '==', '!=', '<=', '>=',
+  '(', ')', '[', ']', '{', '}', ',', '.', '?', ':',
+  '<', '>', '!', '+', '-', '*', '/', '%',
+];
 
 function tokenize(src: string): Token[] {
   const out: Token[] = [];
@@ -88,131 +68,90 @@ function tokenize(src: string): Token[] {
       i++;
       continue;
     }
-    // [OAR-EXPR-6] A comment is not part of the language.
-    if (c === '/' && (src[i + 1] === '/' || src[i + 1] === '*')) {
-      throw new ConditionSyntaxError('[OAR-EXPR-6] a comment is not part of the condition language', i);
-    }
-    if (c === '#') {
-      throw new ConditionSyntaxError('[OAR-EXPR-6] a comment is not part of the condition language', i);
+    if (c === '/' && src[i + 1] === '/') {
+      throw new UnsupportedCelConstruct('comment', i);
     }
     if (c === '"' || c === "'") {
       const start = i;
       const quote = c;
       i++;
       let value = '';
-      for (;;) {
-        if (i >= src.length) throw new ConditionSyntaxError('unterminated string literal', start);
-        const ch = src[i]!;
-        if (ch === quote) {
-          i++;
-          break;
-        }
-        if (ch === '\\') {
-          // [OAR-EXPR-3] The escape set is closed.
+      while (i < src.length && src[i] !== quote) {
+        if (src[i] === '\\') {
           const esc = src[i + 1];
-          if (esc === '\\') value += '\\';
-          else if (esc === '"') value += '"';
-          else if (esc === "'") value += "'";
-          else if (esc === 'n') value += '\n';
-          else if (esc === 'r') value += '\r';
-          else if (esc === 't') value += '\t';
-          else if (esc === 'u') {
-            const hex = src.slice(i + 2, i + 6);
-            if (!/^[0-9A-Fa-f]{4}$/.test(hex)) {
-              throw new ConditionSyntaxError('[OAR-EXPR-3] \\u must be followed by exactly four hexadecimal digits', i);
-            }
-            value += String.fromCharCode(parseInt(hex, 16));
-            i += 6;
-            continue;
-          } else {
-            throw new ConditionSyntaxError(
-              `[OAR-EXPR-3] unsupported string escape \\${esc ?? ''}`,
-              i,
-            );
+          switch (esc) {
+            case 'n': value += '\n'; break;
+            case 't': value += '\t'; break;
+            case 'r': value += '\r'; break;
+            case '"': value += '"'; break;
+            case "'": value += "'"; break;
+            case '\\': value += '\\'; break;
+            default: throw new UnsupportedCelConstruct('string escape', i, `\\${esc ?? ''}`);
           }
           i += 2;
           continue;
         }
-        if (ch === '\n' || ch === '\r') throw new ConditionSyntaxError('[OAR-EXPR-1] literal line break in string', i);
-        value += ch;
+        value += src[i];
         i++;
       }
-      out.push({ t: 'string', value, at: start });
+      if (i >= src.length) throw new CelSyntaxError('unterminated string', start);
+      i++;
+      out.push({ t: 'str', value, at: start });
       continue;
     }
-    if (isDigit(c)) {
+    if (c >= '0' && c <= '9') {
       const start = i;
-      while (i < src.length && isDigit(src[i]!)) i++;
-      // double = digit {digit} "." digit {digit} — a fractional part is required
-      // on both sides of the point, and there is no exponent form.
-      if (src[i] === '.' && isDigit(src[i + 1] ?? '')) {
+      while (i < src.length && /[0-9]/.test(src[i]!)) i++;
+      let isInt = true;
+      if (src[i] === '.' && /[0-9]/.test(src[i + 1] ?? '')) {
+        isInt = false;
         i++;
-        while (i < src.length && isDigit(src[i]!)) i++;
-        if (src[i] === '.') throw new ConditionSyntaxError('malformed number literal', start);
-        if (src[i] === 'e' || src[i] === 'E') {
-          throw new ConditionSyntaxError('[OAR-EXPR-1] exponent notation is not part of the condition language', i);
-        }
-        out.push({ t: 'double', text: src.slice(start, i), at: start });
-        continue;
+        while (i < src.length && /[0-9]/.test(src[i]!)) i++;
       }
-      if (src[i] === '.') throw new ConditionSyntaxError('malformed number literal', start);
       if (src[i] === 'e' || src[i] === 'E') {
-        throw new ConditionSyntaxError('[OAR-EXPR-1] exponent notation is not part of the condition language', i);
+        isInt = false;
+        i++;
+        if (src[i] === '+' || src[i] === '-') i++;
+        while (i < src.length && /[0-9]/.test(src[i]!)) i++;
       }
       if (src[i] === 'u' || src[i] === 'U') {
-        throw new ConditionSyntaxError('[OAR-EXPR-1] an unsigned literal is not part of the condition language', i);
+        throw new UnsupportedCelConstruct('unsigned literal', i);
       }
-      if (src[i] !== undefined && (isLetter(src[i]!) || src[i] === '_')) {
-        throw new ConditionSyntaxError('malformed number literal', start);
-      }
-      out.push({ t: 'int', text: src.slice(start, i), at: start });
+      out.push({ t: 'num', int: isInt, text: src.slice(start, i), at: start });
       continue;
     }
-    if (isLetter(c) || c === '_') {
-      // identifier = name { "." name } — a dotted identifier is a single name.
+    if (/[A-Za-z_]/.test(c)) {
       const start = i;
-      for (;;) {
-        while (i < src.length && (isLetter(src[i]!) || isDigit(src[i]!) || src[i] === '_')) i++;
-        if (src[i] === '.' && (isLetter(src[i + 1] ?? '') || src[i + 1] === '_')) {
-          i++;
-          continue;
-        }
-        break;
-      }
-      if (src[i] === '.') throw new ConditionSyntaxError('a "." must be followed by a name', i);
-      out.push({ t: 'name', text: src.slice(start, i), at: start });
+      while (i < src.length && /[A-Za-z0-9_]/.test(src[i]!)) i++;
+      out.push({ t: 'ident', name: src.slice(start, i), at: start });
       continue;
-    }
-    if (c === '{' || c === '}') {
-      throw new ConditionSyntaxError('[OAR-EXPR-1] a map literal is not part of the condition language', i);
-    }
-    if (c === '.') {
-      throw new ConditionSyntaxError('[OAR-EXPR-2] there is no field-selection operator; index a map<string,string> or call a typed accessor', i);
     }
     const two = src.slice(i, i + 2);
-    if (TWO_CHAR.includes(two)) {
+    if (PUNCT.includes(two)) {
       out.push({ t: 'punct', text: two, at: i });
       i += 2;
       continue;
     }
-    if (ONE_CHAR.includes(c)) {
+    if (PUNCT.includes(c)) {
       out.push({ t: 'punct', text: c, at: i });
       i++;
       continue;
     }
-    if (c === '&' || c === '|') {
-      throw new ConditionSyntaxError(`bitwise ${JSON.stringify(c)} is not part of the condition language`, i);
-    }
-    if (c === '=') {
-      throw new ConditionSyntaxError('[OAR-EXPR-1] assignment is not part of the condition language', i);
-    }
-    throw new ConditionSyntaxError(`unexpected character ${JSON.stringify(c)}`, i);
+    throw new CelSyntaxError(`unexpected character ${JSON.stringify(c)}`, i);
   }
   out.push({ t: 'eof', at: src.length });
   return out;
 }
 
-const RELOPS = new Set(['==', '!=', '<', '<=', '>', '>=', 'in']);
+// Binding powers, loosest to tightest. The ternary is handled separately
+// because it is right-associative and three-armed.
+const BINDING: Record<string, number> = {
+  '||': 1,
+  '&&': 2,
+  '==': 3, '!=': 3, '<': 3, '<=': 3, '>': 3, '>=': 3, in: 3,
+  '+': 4, '-': 4,
+  '*': 5, '/': 5, '%': 5,
+};
 
 class Parser {
   private pos = 0;
@@ -221,135 +160,76 @@ class Parser {
   private peek(): Token {
     return this.toks[this.pos]!;
   }
+
   private next(): Token {
     return this.toks[this.pos++]!;
   }
+
   private atPunct(text: string): boolean {
     const t = this.peek();
     return t.t === 'punct' && t.text === text;
   }
-  private expect(text: string): void {
+
+  private expect(text: string): Token {
     const t = this.next();
     if (t.t !== 'punct' || t.text !== text) {
-      throw new ConditionSyntaxError(`expected ${JSON.stringify(text)}`, t.at);
+      throw new CelSyntaxError(`expected ${JSON.stringify(text)}`, t.at);
     }
+    return t;
   }
 
   parse(): Node {
-    const node = this.ternary();
+    const node = this.expression();
     const end = this.peek();
-    if (end.t !== 'eof') throw new ConditionSyntaxError('unexpected trailing input', end.at);
+    if (end.t !== 'eof') {
+      throw new CelSyntaxError('unexpected trailing input', end.at);
+    }
     return node;
   }
 
-  // ternary = disjunction [ "?" ternary ":" ternary ] — right-associative.
-  private ternary(): Node {
-    const cond = this.disjunction();
+  // expression := ternary (loosest level)
+  expression(): Node {
+    const cond = this.binary(0);
     if (this.atPunct('?')) {
       const at = this.next().at;
-      const then = this.ternary();
+      const then = this.expression();
       this.expect(':');
-      const other = this.ternary();
+      const other = this.expression();
       return { kind: 'ternary', cond, then, other, offset: at };
     }
     return cond;
   }
 
-  private disjunction(): Node {
-    let left = this.conjunction();
-    while (this.atPunct('||')) {
-      const at = this.next().at;
-      left = { kind: 'binary', op: '||', left, right: this.conjunction(), offset: at };
-    }
-    return left;
-  }
-
-  private conjunction(): Node {
-    let left = this.relation();
-    while (this.atPunct('&&')) {
-      const at = this.next().at;
-      left = { kind: 'binary', op: '&&', left, right: this.relation(), offset: at };
-    }
-    return left;
-  }
-
-  // relation = addition [ relop addition ] — the grammar admits at most one
-  // relational operator, so `a < b == c` is not derivable and is rejected.
-  private relation(): Node {
-    const left = this.addition();
-    const t = this.peek();
-    const op = t.t === 'punct' && RELOPS.has(t.text) ? t.text : t.t === 'name' && t.text === 'in' ? 'in' : null;
-    if (op === null) return left;
-    const at = this.next().at;
-    const right = this.addition();
-    const after = this.peek();
-    const chained =
-      (after.t === 'punct' && RELOPS.has(after.text)) || (after.t === 'name' && after.text === 'in');
-    if (chained) {
-      throw new ConditionSyntaxError('[OAR-EXPR-4] a relation admits at most one relational operator', after.at);
-    }
-    return { kind: 'binary', op: op as BinaryOp, left, right, offset: at };
-  }
-
-  private addition(): Node {
-    let left = this.multiplication();
-    for (;;) {
-      const t = this.peek();
-      if (t.t !== 'punct' || (t.text !== '+' && t.text !== '-')) break;
-      const at = this.next().at;
-      left = { kind: 'binary', op: t.text as BinaryOp, left, right: this.multiplication(), offset: at };
-    }
-    return left;
-  }
-
-  private multiplication(): Node {
+  private binary(minBp: number): Node {
     let left = this.unary();
     for (;;) {
       const t = this.peek();
-      if (t.t !== 'punct' || (t.text !== '*' && t.text !== '/' && t.text !== '%')) break;
+      let op: string | undefined;
+      if (t.t === 'punct' && BINDING[t.text] !== undefined) op = t.text;
+      else if (t.t === 'ident' && t.name === 'in') op = 'in';
+      if (op === undefined) break;
+      const bp = BINDING[op]!;
+      if (bp < minBp) break;
       const at = this.next().at;
-      left = { kind: 'binary', op: t.text as BinaryOp, left, right: this.unary(), offset: at };
+      const right = this.binary(bp + 1);
+      left = { kind: 'binary', op: op as BinaryOp, left, right, offset: at };
     }
     return left;
   }
 
-  // unary = [ "!" | "-" ] postfix — exactly zero or one prefix operator, so
-  // `!!x` and `--x` are outside the grammar.
   private unary(): Node {
     const t = this.peek();
     if (t.t === 'punct' && (t.text === '!' || t.text === '-')) {
       const at = this.next().at;
-      const after = this.peek();
-      if (after.t === 'punct' && (after.text === '!' || after.text === '-')) {
-        throw new ConditionSyntaxError('[OAR-EXPR-4] a unary operator may not be repeated', after.at);
-      }
-      // [OAR-EXPR-21] The magnitude 9223372036854775808 is admitted as the
-      // immediate operand of unary minus, without which the least value of the
-      // int type could not be written at all.
-      if (t.text === '-' && after.t === 'int' && after.text === '9223372036854775808') {
-        this.next();
-        return { kind: 'unary', op: '-', operand: { kind: 'int', value: 9223372036854775808n, offset: after.at }, offset: at };
-      }
-      return { kind: 'unary', op: t.text as '!' | '-', operand: this.postfix(), offset: at };
+      return { kind: 'unary', op: t.text as '!' | '-', operand: this.unary(), offset: at };
     }
-    return this.postfix();
-  }
-
-  private postfix(): Node {
-    let node = this.primary();
-    while (this.atPunct('[')) {
-      const at = this.next().at;
-      const index = this.ternary();
-      this.expect(']');
-      node = { kind: 'index', target: node, index, offset: at };
-    }
-    return node;
+    return this.primary();
   }
 
   private primary(): Node {
     const t = this.next();
     if (t.t === 'punct' && t.text === '(') {
-      const inner = this.ternary();
+      const inner = this.expression();
       this.expect(')');
       return inner;
     }
@@ -357,7 +237,7 @@ class Parser {
       const items: Node[] = [];
       if (!this.atPunct(']')) {
         for (;;) {
-          items.push(this.ternary());
+          items.push(this.expression());
           if (this.atPunct(',')) {
             this.next();
             continue;
@@ -366,39 +246,36 @@ class Parser {
         }
       }
       this.expect(']');
-      return { kind: 'list', items, offset: t.at };
+      return this.noIndex({ kind: 'list', items, offset: t.at });
     }
-    if (t.t === 'int') {
-      // [OAR-EXPR-21] An integer literal that does not fit 64 bits is rejected
-      // at load rather than silently losing precision.
-      const value = BigInt(t.text);
-      if (value > 9223372036854775807n) {
-        throw new ConditionSyntaxError(`[OAR-EXPR-21] integer literal ${t.text} does not fit int`, t.at);
-      }
-      return { kind: 'int', value, offset: t.at };
+    if (t.t === 'punct' && t.text === '{') {
+      throw new UnsupportedCelConstruct('map literal', t.at);
     }
-    if (t.t === 'double') {
-      const value = Number(t.text);
-      // [OAR-EXPR-21] A double literal whose nearest binary64 value is not
-      // finite is rejected at load, for the same reason [OAR-EXPR-14] refuses
-      // to produce an infinity.
-      if (!Number.isFinite(value)) {
-        throw new ConditionSyntaxError(`double literal ${t.text} is not a finite binary64 value`, t.at);
-      }
-      return { kind: 'double', value, offset: t.at };
+    if (t.t === 'num') {
+      const node: Node = t.int
+        ? { kind: 'int', value: BigInt(t.text), offset: t.at }
+        : { kind: 'double', value: Number(t.text), offset: t.at };
+      return this.noIndex(node);
     }
-    if (t.t === 'string') return { kind: 'string', value: t.value, offset: t.at };
-    if (t.t === 'name') {
-      if (t.text === 'true' || t.text === 'false') {
-        return { kind: 'bool', value: t.text === 'true', offset: t.at };
+    if (t.t === 'str') {
+      return this.noIndex({ kind: 'string', value: t.value, offset: t.at });
+    }
+    if (t.t === 'ident') {
+      if (t.name === 'true' || t.name === 'false') {
+        return this.noIndex({ kind: 'bool', value: t.name === 'true', offset: t.at });
       }
-      if (t.text === 'in') throw new ConditionSyntaxError('"in" is a reserved word', t.at);
+      if (t.name === 'null') {
+        return this.noIndex({ kind: 'null', offset: t.at });
+      }
       if (this.atPunct('(')) {
+        if (MACROS.has(t.name)) {
+          throw new UnsupportedCelConstruct(`macro ${t.name}`, t.at);
+        }
         this.next();
         const args: Node[] = [];
         if (!this.atPunct(')')) {
           for (;;) {
-            args.push(this.ternary());
+            args.push(this.callArgument());
             if (this.atPunct(',')) {
               this.next();
               continue;
@@ -407,15 +284,81 @@ class Parser {
           }
         }
         this.expect(')');
-        return { kind: 'call', name: t.text, args, offset: t.at };
+        return this.noIndex({ kind: 'call', name: t.name, args, offset: t.at });
       }
-      return { kind: 'ident', name: t.text, offset: t.at };
+      if (this.atPunct('.')) {
+        this.next();
+        const field = this.next();
+        if (field.t !== 'ident') {
+          throw new CelSyntaxError('expected a field name after "."', field.at);
+        }
+        if (this.atPunct('(')) {
+          throw new UnsupportedCelConstruct(`method call .${field.name}()`, field.at);
+        }
+        if (this.atPunct('.')) {
+          throw new UnsupportedCelConstruct('chained field selection', this.peek().at);
+        }
+        return this.noIndex({ kind: 'select', target: t.name, field: field.name, offset: t.at });
+      }
+      return this.noIndex({ kind: 'ident', name: t.name, offset: t.at });
     }
-    throw new ConditionSyntaxError('expected an expression', t.at);
+    throw new CelSyntaxError('expected an expression', t.at);
+  }
+
+  // Function arguments are literals or identifiers only; a nested call would
+  // widen the evaluated surface past what this implementation declares.
+  private callArgument(): Node {
+    const t = this.peek();
+    if (t.t === 'str') {
+      this.next();
+      return { kind: 'string', value: t.value, offset: t.at };
+    }
+    if (t.t === 'num') {
+      this.next();
+      return t.int
+        ? { kind: 'int', value: BigInt(t.text), offset: t.at }
+        : { kind: 'double', value: Number(t.text), offset: t.at };
+    }
+    if (t.t === 'ident') {
+      if (t.name === 'true' || t.name === 'false') {
+        this.next();
+        return { kind: 'bool', value: t.name === 'true', offset: t.at };
+      }
+      const after = this.toks[this.pos + 1];
+      if (after && after.t === 'punct' && after.text === '(') {
+        throw new UnsupportedCelConstruct('nested call argument', t.at);
+      }
+      this.next();
+      return { kind: 'ident', name: t.name, offset: t.at };
+    }
+    throw new UnsupportedCelConstruct('non-literal call argument', t.at);
+  }
+
+  // Indexing is outside the grammar wherever it appears, and so is any
+  // selection or call hanging off something that is not a bare identifier —
+  // that shape is a macro or a method call.
+  private noIndex(node: Node): Node {
+    if (this.atPunct('[')) {
+      throw new UnsupportedCelConstruct('index expression', this.peek().at);
+    }
+    if (this.atPunct('.')) {
+      const at = this.peek().at;
+      const field = this.toks[this.pos + 1];
+      const name = field && field.t === 'ident' ? field.name : '';
+      if (MACROS.has(name)) {
+        throw new UnsupportedCelConstruct(`macro ${name}`, at);
+      }
+      const after = this.toks[this.pos + 2];
+      if (after && after.t === 'punct' && after.text === '(') {
+        throw new UnsupportedCelConstruct(`method call .${name}()`, at);
+      }
+      throw new UnsupportedCelConstruct('chained field selection', at);
+    }
+    return node;
   }
 }
 
-/** Parse a condition, or throw naming the offending construct and its offset. */
+/** Parse a condition into the accepted AST, or throw naming what is unsupported. */
 export function parse(src: string): Node {
   return new Parser(tokenize(src)).parse();
 }

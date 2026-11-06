@@ -88,9 +88,16 @@ async function main() {
     // engine. Counter keys carry a #scope suffix for a scoped rule [OAR-CONF-33].
     const occurrenceCount = Array.isArray(fx.input?.occurrences) ? fx.input.occurrences.length : 1;
     const ACTION = { fire_count: 'increment_counter', breaker_count: 'increment_breaker' };
+    const ruleDocs = Array.isArray(fx.rules)
+      ? fx.rules
+      : Array.isArray(fx.rule)
+        ? fx.rule
+        : fx.rule !== undefined
+          ? [fx.rule]
+          : [];
     for (const [key, counters] of Object.entries(fx.expected?.counters ?? {})) {
       const qualified = key.split('#')[0];
-      const rule = (fx.rules ?? []).find(
+      const rule = ruleDocs.find(
         (r) => (r.namespace ? `${r.namespace}/${r.id}` : r.id) === qualified,
       );
       for (const [field, value] of Object.entries(counters ?? {})) {
@@ -122,27 +129,6 @@ async function main() {
   }
   for (const file of [...listed].sort()) {
     if (!present.has(file)) problems.push(`conformance/manifest.json lists ${file}, which does not exist`);
-  }
-
-  // [OAR-CONF-35] The manifest marks a fixture baseline exactly when its
-  // capability document claims no profile, no host fact, no activity window, no
-  // content mutation, and no detector beyond the three the corpus reserves. The
-  // flag is computed here from the fixture itself, so the manifest cannot
-  // quietly promise a different floor than the corpus delivers.
-  const RESERVED = new Set(['detector://noop', 'detector://error', 'detector://fixture']);
-  for (const entry of manifest.fixtures ?? []) {
-    if (!present.has(entry.file)) continue;
-    const fx = JSON.parse(await readFile(join(CORPUS, entry.file), 'utf8'));
-    const cap = fx.input?.capability ?? {};
-    const minimal =
-      Array.isArray(cap.profiles) && cap.profiles.length === 0 &&
-      (cap.host_facts === undefined || cap.host_facts.length === 0) &&
-      cap.activity_window === 0 &&
-      cap.supports_transform === false &&
-      Array.isArray(cap.detectors) && cap.detectors.every((d) => RESERVED.has(d));
-    const flagged = entry.baseline === true;
-    if (minimal && !flagged) problems.push(`${entry.file}: declares the baseline capability but the manifest does not mark it baseline [OAR-CONF-35]`);
-    if (!minimal && flagged) problems.push(`${entry.file}: marked baseline but declares more than the baseline capability [OAR-CONF-35]`);
   }
 
   const exemptDoc = JSON.parse(await readFile(join(CORPUS, 'exempt.json'), 'utf8'));
