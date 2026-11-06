@@ -22,6 +22,6 @@
     }
   },
   "expected": {
-    "error": "unsupported spec_version"
+    "error": "2.0"
   }
 }

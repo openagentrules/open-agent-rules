@@ -1,30 +1,50 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openagentrules.org/spec/1.1/oar.schema.json",
-  "title": "OpenAgentRule",
-  "description": "Open Agent Rules (OAR) rule document. An OAR rule is an Anchor Binding with effect block|transform (or OAR Decision refinements warn|nudge|allow) plus hint copy fields. Normative spec: https://openagentrules.org/spec/1.1/. Does not redefine on/selector — those come from the Binding grammar. The document world is closed: any key neither branch declares is rejected, except x- extensions ([OAR-DOC-20]).",
+  "title": "OpenAgentRulesDocument",
+  "description": "Open Agent Rules (OAR) document: either a rule (kind schema|policy|invariant|detector, [OAR-DOC-2]) or a hint (kind hint, [OAR-HINT-1]). The document world is closed: any key the matching branch does not declare is rejected, except x- extensions ([OAR-DOC-20]). Normative spec: https://openagentrules.org/spec/1.1/.",
+  "type": "object",
   "allOf": [
     {
-      "$ref": "anchor-binding.schema.json"
-    },
-    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "hint"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/hint"
+      },
+      "else": {
+        "$ref": "#/$defs/rule"
+      }
+    }
+  ],
+  "$defs": {
+    "rule": {
       "type": "object",
       "required": [
         "spec_version",
         "id",
         "kind",
+        "on",
+        "selector",
         "effect"
       ],
       "properties": {
         "spec_version": {
           "type": "string",
           "pattern": "^[0-9]+\\.[0-9]+$",
-          "description": "OAR spec version this document targets. This engine accepts \"1.0\" and \"1.1\"; an unsupported major fails closed at load ([OAR-DOC-3])."
+          "description": "OAR spec version this document targets. An engine rejects a major it does not support, before any other processing ([OAR-DOC-3])."
         },
         "id": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]*$",
-          "description": "Stable rule id — equals the hints/<CODE>.yaml directory/file stem (SCREAMING_SNAKE)."
+          "description": "Stable rule identifier ([OAR-DOC-4]). The identifier a decision carries ([OAR-EVAL-7])."
         },
         "namespace": {
           "type": "string",
@@ -39,17 +59,17 @@
         },
         "title": {
           "type": "string",
-          "description": "Human-readable short title."
+          "description": "Human-readable short title ([OAR-DOC-5])."
         },
         "kind": {
           "type": "string",
           "enum": [
             "schema",
-            "invariant",
             "policy",
+            "invariant",
             "detector"
           ],
-          "description": "Formal tier. Ordering on Emit: schema → policy → invariant → detector, then id lexical."
+          "description": "Formal tier. Fixes evaluation order and nothing else ([OAR-DOC-6], [OAR-EVAL-2])."
         },
         "severity": {
           "type": "string",
@@ -58,7 +78,16 @@
             "warn",
             "info"
           ],
-          "description": "UI/telemetry severity only. Never affects selection, evaluation, ordering, precedence, or the returned decision ([OAR-DOC-7])."
+          "description": "Telemetry and presentation only. Never affects selection, evaluation, ordering, precedence, or the returned decision ([OAR-DOC-7])."
+        },
+        "on": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+          "description": "The anchor this rule binds: a core anchor id resolved through the anchor profile map, or a host-native anchor id ([OAR-SEL-1], [OAR-PROF-3], [OAR-PROF-4])."
+        },
+        "selector": {
+          "$ref": "selector.schema.json"
         },
         "effect": {
           "type": "string",
@@ -69,7 +98,19 @@
             "allow",
             "transform"
           ],
-          "description": "OAR Decision effect. Binding bus effect remains inform|block|transform; warn|nudge|allow refine block-class Decisions. transform mutates content in place (content-safety series)."
+          "description": "The decision effect when the rule fires ([OAR-DOC-8])."
+        },
+        "when": {
+          "type": "string",
+          "description": "Condition expression over the declared fact environment (section 5). Absent means satisfied ([OAR-DOC-9])."
+        },
+        "flow": {
+          "type": "array",
+          "description": "Ordered step names matched against the recent activity window ([OAR-DOC-10], [OAR-FACT-10]).",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "enforcement": {
           "type": "string",
@@ -78,32 +119,42 @@
             "monitor"
           ],
           "default": "enforce",
-          "description": "monitor evaluates + telemetry only — never acts (no block/nudge/transform/on_fire)."
+          "description": "monitor evaluates and records without acting ([OAR-DOC-11], [OAR-EVAL-8])."
         },
         "mandatory": {
           "type": "boolean",
           "default": false,
-          "description": "When true, cannot be disabled by overlay/pack/caller."
+          "description": "When true, the rule cannot be disabled by overlay, pack, or caller ([OAR-DOC-12])."
         },
         "on_error": {
-          "type": "string",
-          "description": "fail_closed | fail_open | <CODE> when a fact provider or detector errors.",
-          "default": "fail_closed"
+          "description": "Behaviour when a fact provider or detector errors: fail_closed, fail_open, or a rule identifier to substitute ([OAR-DOC-13]).",
+          "default": "fail_closed",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "fail_closed",
+                "fail_open"
+              ]
+            },
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            }
+          ]
         },
         "on_fire": {
           "type": "array",
-          "description": "Closed vocabulary of engine side-effects run when the rule fires. CEL never mutates state.",
-          "items": {
-            "$ref": "#/$defs/onFireAction"
-          },
-          "uniqueItems": true
-        },
-        "flow": {
-          "type": "array",
-          "description": "Optional multi-step sequence (Invariant-style ->) over recent ToolCall/Message.",
+          "description": "Declared engine side-effects run when the rule fires, from the closed vocabulary of section 6 ([OAR-DOC-14]).",
           "items": {
             "type": "string",
-            "minLength": 1
+            "enum": [
+              "increment_counter",
+              "reset_counter",
+              "publish_event",
+              "increment_breaker",
+              "reset_breaker"
+            ]
           }
         },
         "stream": {
@@ -113,11 +164,11 @@
             "chunk"
           ],
           "default": "buffered",
-          "description": "Streaming evaluation mode for output/tool_result Anchors. Default buffered."
+          "description": "Streaming evaluation mode for output and tool_result anchors ([OAR-DOC-15])."
         },
         "emit": {
           "type": "string",
-          "description": "Provenance channel (guard:*, rule:*). Kept from hint.yaml."
+          "description": "Provenance channel naming the pipeline stage that published the document ([OAR-DOC-29])."
         },
         "references": {
           "$ref": "#/$defs/references"
@@ -126,36 +177,28 @@
           "$ref": "#/$defs/detector"
         },
         "what": {
-          "type": "string"
+          "type": "string",
+          "description": "Presentation copy: what happened ([OAR-DOC-18], Appendix B)."
         },
         "cause": {
-          "type": "string"
+          "type": "string",
+          "description": "Presentation copy: what caused it ([OAR-DOC-18], Appendix B)."
         },
         "why": {
-          "type": "string"
+          "type": "string",
+          "description": "Presentation copy: why it matters ([OAR-DOC-18], Appendix B)."
         },
         "fix": {
-          "type": "string"
+          "type": "string",
+          "description": "Presentation copy: how to fix it ([OAR-DOC-18], Appendix B)."
         },
         "instead": {
-          "type": "string"
+          "type": "string",
+          "description": "Presentation copy: what to do instead ([OAR-DOC-18], Appendix B)."
         },
         "message": {
-          "type": "string"
-        },
-        "category": {
-          "type": "string"
-        },
-        "context_schema": {
-          "type": "object",
-          "additionalProperties": true
-        },
-        "scenarios": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": true
-          }
+          "type": "string",
+          "description": "Presentation copy: the one-line message ([OAR-DOC-18], Appendix B)."
         },
         "tools": {
           "type": "array",
@@ -165,10 +208,6 @@
           "description": "Deprecated top-level tool filter — prefer selector.tools. Still accepted and treated as selector.tools when that is absent ([OAR-DOC-19]).",
           "deprecated": true
         },
-        "evidence": {
-          "type": "object",
-          "additionalProperties": true
-        },
         "requires_facts": {
           "type": "array",
           "items": {
@@ -176,7 +215,7 @@
             "minLength": 1
           },
           "uniqueItems": true,
-          "description": "Facts this rule needs. A host that does not provide one rejects the rule at load, naming both ([OAR-PROF-6])."
+          "description": "Facts this rule needs. A host that does not provide one rejects the rule at load, naming both ([OAR-DOC-23], [OAR-PROF-6])."
         },
         "profile": {
           "type": "string",
@@ -185,21 +224,190 @@
             "host"
           ],
           "description": "Informational record of the author's intent. Carries no behaviour — portability is determined by the anchor and the facts ([OAR-DOC-24])."
+        },
+        "category": {
+          "type": "string",
+          "description": "Informational publisher tag classifying the rule ([OAR-DOC-30])."
+        },
+        "context_schema": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Informational object a publisher may use to describe host context ([OAR-DOC-30])."
+        },
+        "scenarios": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "description": "Informational list of objects, each recording example values for the rule's facts ([OAR-DOC-30])."
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Informational object carrying the publisher's supporting material ([OAR-DOC-30])."
         }
-      }
-    }
-  ],
-  "$defs": {
-    "onFireAction": {
-      "type": "string",
-      "enum": [
-        "increment_counter",
-        "reset_counter",
-        "publish_event",
-        "increment_breaker",
-        "reset_breaker"
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "detector"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "detector"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "schema",
+                  "policy",
+                  "invariant"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "detector"
+              ]
+            }
+          }
+        }
       ],
-      "description": "Closed on_fire vocabulary. Schema is SSOT — do not hand-maintain a parallel Go AllOnFire list (Track 190 polarity). Optional thin Go consts only as sugar with schema⊇const drift."
+      "patternProperties": {
+        "^x-": {
+          "description": "Implementation extension. Ignored by other implementations ([OAR-DOC-20])."
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "hint": {
+      "type": "object",
+      "required": [
+        "spec_version",
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "spec_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+$",
+          "description": "OAR spec version this document targets ([OAR-DOC-3])."
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "The code the host raises; the key the hint is registered under ([OAR-HINT-2])."
+        },
+        "namespace": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$",
+          "description": "Publisher scope ([OAR-DOC-21])."
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable short title ([OAR-DOC-5])."
+        },
+        "kind": {
+          "type": "string",
+          "const": "hint",
+          "description": "A hint document is never selected or evaluated ([OAR-HINT-1])."
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "block",
+            "warn",
+            "info"
+          ],
+          "description": "Telemetry and presentation only ([OAR-DOC-7])."
+        },
+        "emit": {
+          "type": "string",
+          "description": "Provenance channel naming the pipeline stage that published the document ([OAR-DOC-29])."
+        },
+        "references": {
+          "$ref": "#/$defs/references"
+        },
+        "what": {
+          "type": "string",
+          "description": "Static presentation copy: what happened ([OAR-HINT-3])."
+        },
+        "cause": {
+          "type": "string",
+          "description": "Static presentation copy: what caused it ([OAR-HINT-3])."
+        },
+        "why": {
+          "type": "string",
+          "description": "Static presentation copy: why it matters ([OAR-HINT-3])."
+        },
+        "fix": {
+          "type": "string",
+          "description": "Static presentation copy: how to fix it ([OAR-HINT-3])."
+        },
+        "instead": {
+          "type": "string",
+          "description": "Static presentation copy: what to do instead ([OAR-HINT-3])."
+        },
+        "message": {
+          "type": "string",
+          "description": "Static presentation copy: the one-line message ([OAR-HINT-3])."
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "what"
+          ]
+        },
+        {
+          "required": [
+            "cause"
+          ]
+        },
+        {
+          "required": [
+            "why"
+          ]
+        },
+        {
+          "required": [
+            "fix"
+          ]
+        },
+        {
+          "required": [
+            "instead"
+          ]
+        },
+        {
+          "required": [
+            "message"
+          ]
+        }
+      ],
+      "patternProperties": {
+        "^x-": {
+          "description": "Implementation extension. Ignored by other implementations ([OAR-DOC-20])."
+        }
+      },
+      "unevaluatedProperties": false
     },
     "references": {
       "type": "object",
@@ -211,7 +419,7 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "OWASP LLM Top 10 tags (e.g. LLM01). Telemetry/docs only."
+          "description": "OWASP LLM Top 10 tags (e.g. LLM01). Telemetry/docs only ([OAR-DOC-16])."
         },
         "mitre_atlas": {
           "type": "array",
@@ -219,13 +427,13 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "MITRE ATLAS technique tags. Telemetry/docs only."
+          "description": "MITRE ATLAS technique tags. Telemetry/docs only ([OAR-DOC-16])."
         }
       }
     },
     "detector": {
       "type": "object",
-      "description": "Present iff kind is detector. Condition delegated to the detector seam.",
+      "description": "Detector seam: the condition is delegated to a registered detector ([OAR-DOC-17]).",
       "required": [
         "ref"
       ],
@@ -238,12 +446,5 @@
         }
       }
     }
-  },
-  "type": "object",
-  "patternProperties": {
-    "^x-": {
-      "description": "Implementation extension. Ignored by other implementations ([OAR-DOC-20])."
-    }
-  },
-  "unevaluatedProperties": false
+  }
 }

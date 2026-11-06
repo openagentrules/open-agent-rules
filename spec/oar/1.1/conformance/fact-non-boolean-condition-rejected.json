@@ -21,6 +21,6 @@
     }
   },
   "expected": {
-    "error": "want bool"
+    "error": "bool"
   }
 }

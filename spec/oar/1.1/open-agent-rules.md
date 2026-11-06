@@ -56,7 +56,10 @@ otherwise.
   accept other serialisations (YAML is the common authoring form) provided the mapping to
   JSON is lossless; interchange between implementations MUST use JSON.
 - **[OAR-DOC-2]** A rule document MUST contain `spec_version`, `id`, `kind`, `on`,
-  `selector`, and `effect`. An engine MUST reject a document missing any of them.
+  `selector`, and `effect`. An engine MUST reject a document missing any of them. A document
+  whose `kind` is `hint` is a hint document, not a rule: it MUST contain `spec_version`,
+  `id`, and `kind`, MUST NOT contain `on`, `selector`, or `effect`, and is governed by
+  section 9.
 - **[OAR-DOC-3]** `spec_version` is a string of the form `<major>.<minor>`. An engine MUST
   reject a document whose major version it does not support, and MUST NOT silently
   downgrade or coerce it. An engine that supports major version 1 MUST accept `"1.0"` and
@@ -65,8 +68,10 @@ otherwise.
   reused for a rule with a different meaning once published.
 - **[OAR-DOC-5]** `title` is an optional human-readable label. It MUST NOT affect any
   decision.
-- **[OAR-DOC-6]** `kind` MUST be one of `schema`, `policy`, `invariant`, `detector`. It fixes
-  evaluation order and nothing else — see `[OAR-EVAL-2]`.
+- **[OAR-DOC-6]** `kind` MUST be one of `schema`, `policy`, `invariant`, `detector`, or
+  `hint`. For a rule document it fixes evaluation order and nothing else — see
+  `[OAR-EVAL-2]`. A document with `kind: hint` is a hint document, which is never selected
+  or evaluated — see section 9.
 - **[OAR-DOC-7]** `severity` is optional, one of `block`, `warn`, `info`, and is telemetry
   and presentation only. An engine MUST NOT let `severity` affect selection, condition
   evaluation, ordering, precedence, or the returned decision. Two rules differing only in
@@ -91,7 +96,9 @@ otherwise.
 - **[OAR-DOC-17]** `detector` is an object carrying a `ref`. A document with
   `kind: detector` MUST carry it; a document with any other `kind` MUST NOT.
 - **[OAR-DOC-18]** A document MAY carry presentation copy describing the finding and the
-  remedy. Copy fields MUST NOT affect selection, evaluation, ordering, or precedence.
+  remedy, in the members `what`, `cause`, `why`, `fix`, `instead`, and `message`. Copy
+  fields MUST NOT affect selection, evaluation, ordering, or precedence. A rule's copy MAY
+  bind facts, in the language of Appendix B; a hint's copy is static — see section 9.
 
 ### 2.1 Fields added in 1.1
 
@@ -123,6 +130,15 @@ document.
 - **[OAR-DOC-25]** `code`, an alias of `id` in revision 1.0, is deprecated. An engine MUST
   accept it when `spec_version` is `"1.0"` and MUST reject it when `spec_version` is `"1.1"`
   or later.
+- **[OAR-DOC-29]** `emit` is an optional provenance tag naming the pipeline stage or
+  component that produced the finding. It MUST NOT affect selection, evaluation, ordering,
+  or precedence, and an engine MUST NOT interpret its value.
+- **[OAR-DOC-30]** `category`, `context_schema`, `scenarios`, and `evidence` are optional
+  informational fields a publisher MAY attach to a rule: `category` a string tag,
+  `context_schema` an object, `scenarios` a list of objects, and `evidence` an object. An
+  engine MUST accept them and MUST NOT derive selection, evaluation, ordering, precedence,
+  or the returned decision from them. They exist so a document that carries host-side
+  guidance metadata remains loadable; their meaning is the publisher's, not the engine's.
 
 ### 2.2 Example (non-normative)
 
@@ -300,13 +316,59 @@ that profile.
 | `mcp_call_ok` | `bool` | True after a bridged call that returned without error. False before the call. |
 | `mcp_error_code` | `string` | The machine error code a failed bridged call reported, never free text. |
 | `mcp_schema_matched` | `bool` | True when at least one declared result schema validated the call's result. |
-| `mcp_server_configured` | `(string) -> bool` | True when the catalogue contains the given server id. |
-| `mcp_server_enabled` | `(string) -> bool` | True when the given server is configured and enabled. |
+| `mcp_server_configured_for` | `(string) -> bool` | True when the catalogue contains the given server id. |
+| `mcp_server_enabled_for` | `(string) -> bool` | True when the given server is configured and enabled. |
 | `mcp_has_field` | `(string) -> bool` | True when the projected result carries the given key. |
 | `mcp_field_bool` | `(string) -> bool` | The projected boolean at the given key; false when absent or wrongly typed. |
 | `mcp_field_string` | `(string) -> string` | The projected string at the given key; empty when absent. |
 | `mcp_field_int` | `(string) -> int` | The projected integer at the given key; zero when absent. |
 <!-- /oar:table -->
+
+The `mcp` profile's parameterized forms carry the `_for` suffix because `[OAR-FACT-19]`
+forbids a fact and a function sharing a name. The suffix keeps `mcp_server_configured` and
+`mcp_server_configured_for` distinct in the condition language's single namespace.
+
+### 5.5 Fact semantics
+
+- **[OAR-FACT-16]** The condition language's type vocabulary is closed: `bool`, `int`,
+  `double`, `string`, `list<string>`, `map<string, dyn>`, and `list<map<string, dyn>>`, plus
+  the function signatures of `[OAR-FACT-7]`. An engine MUST NOT declare a fact under a type
+  outside this vocabulary.
+- **[OAR-FACT-17]** An `int` is a signed 64-bit integer. A `double` is an IEEE 754
+  double-precision value; a `double` fact whose value is not finite — NaN or an infinity —
+  is a fact-provider failure under `[OAR-OPS-2]`.
+- **[OAR-FACT-18]** An engine MUST check a fact's value against its declared type before the
+  condition consumes it. A value that violates its declared type is a fact-provider failure
+  under `[OAR-OPS-2]`, not a coercion, a default, or a silent reinterpretation.
+- **[OAR-FACT-19]** Fact names and observation function names share a single namespace. An
+  engine MUST NOT declare a fact and a function under the same name. A condition language
+  that distinguishes them syntactically is not sufficient, because an engine may be hosted
+  in a language that does not.
+- **[OAR-FACT-20]** `tool_args_fingerprint` is a digest of the tool name and the tool's
+  arguments, computed so that the same tool with the same arguments yields the same digest
+  and a different tool, different arguments, or a different argument order yields a
+  different one. The digest MUST be stable across sessions and across engines claiming the
+  core, so a rule keyed on a repeat of the same call behaves identically everywhere.
+- **[OAR-FACT-21]** A fact's value is fixed at the occurrence: every rule evaluated at one
+  anchor occurrence observes the same value for the same fact, and a rule MUST NOT observe
+  a value that differs between two evaluations at the same occurrence.
+- **[OAR-FACT-22]** A `map<string, dyn>` carries dynamically typed members: the map's
+  declaration fixes the map, not what each member holds. A selection into such a map reads
+  the member's value. Because the member's type is not declared, an engine MUST reject at
+  load a condition whose use of a selected member does not type-check against the type the
+  engine assumes for it.
+- **[OAR-FACT-23]** A *fact-provider failure* is a provider raising an error, a value
+  violating its declared type under `[OAR-FACT-18]`, or a non-finite `double` under
+  `[OAR-FACT-17]`. It is never a value the condition reads: the engine's `on_error`
+  behaviour governs the rule instead.
+- **[OAR-FACT-24]** A zero value is a value, not an absence. An engine MUST NOT treat a
+  fact at its zero value as a fact-provider failure, and MUST NOT substitute a different
+  value for it.
+- **[OAR-FACT-25]** Every declared fact has a value at every occurrence. When a provider
+  has nothing to report, the fact is at its zero value: `false` for `bool`, `0` for `int`,
+  `0.0` for `double`, the empty string for `string`, the empty list for `list<string>` and
+  `list<map<string, dyn>>`, and the empty map for `map<string, dyn>`. Absence is not a
+  fact-provider failure.
 
 ---
 
@@ -426,9 +488,58 @@ unsupported:
 
 ---
 
-## 9. Conformance
+## 9. The hint channel
 
-### 9.1 The runner algorithm
+Some situations a host handles are not decisions about an action in flight: a tool's output
+was capped, a workflow phase ended, a secret was redacted on the way out. The guard pipeline
+has no fact that identifies them — they are observations the host raises on its own, after or
+outside the pipeline, and no `when` condition can select them. Publishing their copy as rules
+would force either a fact family the format does not have or an enforcement mode that means
+"never evaluate". The hint channel is the format's answer: a document class that publishes
+presentation copy keyed by a code, and takes no part in evaluation at all.
+
+- **[OAR-HINT-1]** A document whose `kind` is `hint` is a hint document. It MUST contain
+  `spec_version`, `id`, and `kind`, and MUST NOT contain `on`, `selector`, `effect`, `when`,
+  `flow`, `enforcement`, `mandatory`, `on_error`, `on_fire`, `stream`, `detector`,
+  `requires_facts`, `tools`, or `profile`. An engine MUST load hint documents it finds in a
+  rule set and MUST NOT select or evaluate them.
+- **[OAR-HINT-2]** A hint document's `id` is the code the host raises. It follows the
+  identifier grammar of `[OAR-DOC-4]`. A hint MUST carry at least one copy field
+  (`[OAR-DOC-18]`): a hint that publishes no copy is not a hint.
+- **[OAR-HINT-3]** A hint's copy is static. It MUST NOT carry the bindings of Appendix B:
+  the host raising a code has no fact environment, and there is nothing for a binding to
+  name. Copy members a hint omits are simply absent.
+- **[OAR-HINT-4]** When a host raises a code, it renders the copy of the hint registered
+  under that `id` when one is loaded, and otherwise the bare code. A host MAY raise codes
+  where no hint channel is loaded at all. Which hints a host loads, and where it keeps them,
+  is the host's own convention and is not normative here.
+- **[OAR-HINT-5]** A hint document is validated at load like any document: schema, version
+  gate, and unknown fields. An engine MUST report a load error in a hint and MUST NOT
+  silently ignore it. A hint that failed to load MUST NOT be rendered.
+- **[OAR-HINT-6]** A hint MUST NOT affect selection, evaluation, ordering, precedence, or
+  any decision, and MUST NOT carry side-effects. Two rule sets differing only in hint
+  documents MUST produce identical decisions.
+
+A hint document looks like this (non-normative):
+
+```json
+{
+  "spec_version": "1.1",
+  "id": "TOOL_OUTPUT_SPILL_CAPPED",
+  "kind": "hint",
+  "title": "Tool output spill capped",
+  "severity": "info",
+  "what": "The tool's output was capped before it reached the model.",
+  "why": "Uncapped output can crowd out the conversation and hide the part that matters.",
+  "fix": "Ask for the specific slice you need instead of the whole result."
+}
+```
+
+---
+
+## 10. Conformance
+
+### 10.1 The runner algorithm
 
 The requirements below define the evaluation algorithm end to end. Each step is separately
 identified so a conformance fixture can cite it.
@@ -458,14 +569,16 @@ identified so a conformance fixture can cite it.
 - **[OAR-CONF-12]** An engine MUST apply the `on_fire` actions of every rule that fired and
   was enforced.
 
-### 9.2 Fixture shape
+### 10.2 Fixture shape
 
 - **[OAR-CONF-13]** A conformance fixture is a JSON object with `rule`, `input`, and
-  `expected`. `rule` is a rule document or a list of rule documents. `input` carries the
-  `anchor` at which the occurrence happens and a `facts` map, and MAY carry `recent_tools`
-  (the recent activity window `flow` matches against), `session_id` (the scope counters are
-  keyed by), and `profile` (an anchor profile map). `expected` describes the outcome the
-  engine MUST produce.
+  `expected`, and MAY carry `hints` — a list of hint documents (`[OAR-HINT-1]`) the engine
+  loads and never evaluates. `rule` is a rule document or a list of rule documents. `input`
+  carries the `anchor` at which the occurrence happens and a `facts` map, and MAY carry
+  `recent_tools` (the recent activity window `flow` matches against), `session_id` (the
+  scope counters are keyed by), `host_facts` (a map naming each `host`-tier fact the
+  fixture supplies and its declared type, `[OAR-FACT-25]`), and `profile` (an anchor
+  profile map). `expected` describes the outcome the engine MUST produce.
 - **[OAR-CONF-19]** When `input.profile` is present, an engine running the fixture MUST
   resolve the fixture's `on` values through that map instead of its own, and MUST otherwise
   behave exactly as it would for its own map. A fixture whose outcome depends on which core
@@ -498,7 +611,7 @@ identified so a conformance fixture can cite it.
 
 ---
 
-## 10. Extensibility and versioning
+## 11. Extensibility and versioning
 
 - **[OAR-DOC-26]** A minor revision MUST be additive: it may add optional fields and enum
   members, and MUST NOT remove or rename a required field or change the decision an existing
@@ -515,4 +628,71 @@ identified so a conformance fixture can cite it.
 | Version | Change |
 |---------|--------|
 | 1.0 | First published document model, selector, evaluation, facts, stateful effects, operational semantics, conformance fixture shape. |
-| 1.1 | Additive: core anchors and the anchor profile map, fact tiers and host namespaces, `namespace`, `requires_facts`, `profile`, `x-` extension policy, closed unknown-field policy, `code` deprecated. Every 1.0 document remains valid. |
+| 1.1 | Additive: core anchors and the anchor profile map, fact tiers and host namespaces, `namespace`, `requires_facts`, `profile`, `x-` extension policy, closed unknown-field policy, `code` deprecated. Adds the hint channel (`kind: hint`, section 9) for host-raised copy keyed by code, copy bindings (Appendix B), and the fact-semantics clauses `[OAR-FACT-16]`–`[OAR-FACT-25]`; the `mcp` profile's parameterized functions take the `_for` suffix. `enforcement: off` is removed — a 1.0 document using it migrates its copy to the hint channel. Every other 1.0 document remains valid. |
+
+---
+
+## Appendix B — Copy bindings (normative)
+
+`copy` members are presentation strings. They MAY contain bindings that name declared facts.
+The engine substitutes those bindings after the decision is resolved, so two engines that
+agree on the decision also agree on the prose that explains it. The language is frozen and
+small: a substitution, a conditional, and nothing else. It is not the condition language of
+section 5, and it is not a host template dialect. A hint's copy carries no bindings
+(`[OAR-HINT-3]`).
+
+```ebnf
+copy_text   = { literal | binding | conditional } ;
+binding     = "{{" ws identifier ws "}}" ;
+conditional = "{%" ws "if" ws [ "not" ws ] identifier ws "%}"
+              copy_text
+              [ "{%" ws "else" ws "%}" copy_text ]
+              "{%" ws "endif" ws "%}" ;
+identifier  = name { "." name } ;
+name        = ( letter | "_" ) { letter | digit | "_" } ;
+ws          = { " " | "\t" | "\n" | "\r" } ;
+literal     = ? any run of code points that does not begin "{{" or "{%" ? ;
+```
+
+- **[OAR-COPY-1]** After the decision is resolved, the engine MUST render each member of the
+  winning rule's `copy` by substituting the bindings of this appendix against the fact
+  environment of the occurrence. A decision of `none` carries no copy.
+- **[OAR-COPY-2]** A binding `{{ identifier }}` names a declared fact. An engine MUST reject
+  at load a copy member whose bindings name an identifier that is not a declared fact, naming
+  the identifier. A mistyped fact name in `copy` is a load failure, never a runtime default.
+- **[OAR-COPY-3]** A copy member MAY contain `{% if identifier %}…{% endif %}` and
+  `{% if identifier %}…{% else %}…{% endif %}`. The `if` branch is taken when the named fact
+  is non-zero under `[OAR-FACT-25]`. `{% if not identifier %}` inverts the test. An engine
+  MUST reject at load any `{%` or `{{` construct this grammar does not derive, naming the
+  construct.
+- **[OAR-COPY-4]** `{{ identifier }}` interpolates a `string` as itself; a `bool` as `true` or
+  `false`; an `int` as a base-10 integer; a `double` in the canonical decimal form of
+  `[OAR-COPY-9]`; and a `list<string>` as its members joined by `", "` (U+002C U+0020), or
+  the empty string when the list is empty. An engine MUST reject at load a binding whose
+  fact's type is not one of those. Observation functions, `map<string, dyn>`, and
+  `list<map<string, dyn>>` cannot be interpolated.
+- **[OAR-COPY-5]** A name appearing in a copy binding or conditional is a fact the rule
+  references for `[OAR-FACT-9]` and `[OAR-PROF-5]`. A non-core fact named only in `copy` MUST
+  still be reached through `requires_facts` (`[OAR-DOC-23]`): copy is presentation, not an
+  exemption from the portability contract.
+- **[OAR-COPY-6]** Rendered copy MUST NOT affect selection, evaluation, ordering, precedence,
+  or the returned effect. Two rules whose `copy` differs only in bindings or prose MUST
+  produce identical decisions when their other fields are equal.
+- **[OAR-COPY-7]** A decision other than `none` MUST carry the rendered `copy` object of the
+  rule whose identifier it carries (`[OAR-EVAL-6]`). Members the rule omitted remain absent.
+  A binding whose fact is at its zero value substitutes that zero value (`[OAR-FACT-24]`,
+  `[OAR-FACT-25]`); it does not remove the member or the decision.
+- **[OAR-COPY-8]** Whitespace inside `{{ }}` and `{% %}` is permitted and insignificant. An
+  engine MUST accept `{{tool}}` and `{{ tool }}` as the same binding.
+- **[OAR-COPY-9]** A double MUST render as the shortest decimal significand that round-trips
+  to the same finite binary64 value, choosing the closest decimal and ties to an even
+  significand. Expand exponent notation into ordinary decimal notation, include a leading
+  zero before a fractional value, and append `.0` when there is no fractional part. Both
+  signed zeroes render as `0.0`. A negative value has one leading minus. For example: `1.0`,
+  `0.0000001`, `-2.5`, and `0.0`. A non-finite `double` never reaches rendering: it is a
+  fact-provider failure under `[OAR-FACT-17]` before rendering begins.
+- **[OAR-COPY-10]** If rendering the copy for an `on_error` block itself fails because a
+  required observation is unavailable or has the wrong runtime type — a fact-provider failure
+  under `[OAR-FACT-23]` — the engine MUST omit the entire rendered copy object, retain the
+  block and its rule identifiers, and MUST NOT coerce the failed observation or substitute
+  its zero value. This presentation failure MUST NOT start another `on_error` evaluation.

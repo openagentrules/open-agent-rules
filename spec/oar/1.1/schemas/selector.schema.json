@@ -1,98 +1,62 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openagentrules.org/spec/1.1/selector.schema.json",
-  "title": "AnchorBindingSelector",
-  "description": "Shared Binding selector vocabulary — Plan 3.9.0 owns (seeded by 3.7.0; reconcile only). Machine-state only — no NL heuristics. Empty / omitted clauses are permissive. Consumed by anchor-binding.schema.json and oar.schema.json via $ref. Shared model: .cursor/plans/pre-release/3_shared_selector_vocabulary.md.",
+  "title": "Selector",
+  "description": "The closed selector vocabulary ([OAR-SEL-7]). Clauses are conjunctive ([OAR-SEL-2]); an omitted clause is permissive ([OAR-SEL-3]); clauses match machine-observable state only ([OAR-SEL-5]).",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "surface": {
-      "description": "Emit surface. Shared vocab uses singular; OAR rules may also set profiles[] / surfaces[].",
-      "type": [
-        "string",
-        "null"
-      ],
-      "enum": [
-        "coordinator",
-        "worker",
-        "phase",
-        null
-      ]
+      "description": "Session surface the occurrence happens on.",
+      "type": ["string", "null"],
+      "enum": ["coordinator", "worker", "phase", null]
     },
     "phase": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "description": "Active workflow phase id, or null when unbound. Required scoping for many tier:workflow Bindings (Plan 3.9.3)."
+      "type": ["string", "null"],
+      "description": "Active workflow phase id, or null when unbound."
     },
     "workflow": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "description": "Workflow catalog id, or null when unbound. Workflow-scoped Binding authorship key (Plan 3.9.3)."
+      "type": ["string", "null"],
+      "description": "Workflow catalog id, or null when unbound."
     },
     "tool": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "description": "Singular tool at tool-lifecycle anchors. Prefer tools[] on OAR rules when matching a set."
+      "type": ["string", "null"],
+      "description": "Singular tool at tool-lifecycle anchors. Prefer tools when matching a set."
     },
     "tools": {
       "type": "array",
-      "description": "OAR multi-tool match (AND with other clauses). All listed tools are eligible; Emit supplies the concrete tool. Prefer this over provisional tool.pre_invoke.<name> anchor ids.",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      },
+      "description": "Multi-tool match (AND with other clauses). All listed tools are eligible; the engine supplies the concrete tool.",
+      "items": { "type": "string", "minLength": 1 },
       "uniqueItems": true
     },
     "profiles": {
       "type": "array",
-      "description": "Tool profiles that must match (OAR-heavy).",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      },
+      "description": "Tool profiles that must match.",
+      "items": { "type": "string", "minLength": 1 },
       "uniqueItems": true
     },
     "surfaces": {
       "type": "array",
-      "description": "Session/manifest surfaces (e.g. implement_investigate). Optional OAR extension of singular surface.",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      },
+      "description": "Session surfaces (e.g. implement_investigate). Plural extension of the singular surface clause.",
+      "items": { "type": "string", "minLength": 1 },
       "uniqueItems": true
     },
     "session_posture": {
       "type": "array",
       "description": "Optional session posture filter (e.g. spec).",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      },
+      "items": { "type": "string", "minLength": 1 },
       "uniqueItems": true
     },
     "principal": {
-      "description": "Caller-identity scoping for multi-tenant adopters. Shared vocab enum or OAR string[] of api-key/team/tenant ids.",
+      "description": "Caller-identity scoping for multi-tenant adopters: a shared-vocabulary role or a list of caller ids.",
       "oneOf": [
         {
           "type": "string",
-          "enum": [
-            "human",
-            "coordinator",
-            "worker"
-          ]
+          "enum": ["human", "coordinator", "worker"]
         },
         {
           "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
+          "items": { "type": "string", "minLength": 1 },
           "uniqueItems": true
         }
       ]

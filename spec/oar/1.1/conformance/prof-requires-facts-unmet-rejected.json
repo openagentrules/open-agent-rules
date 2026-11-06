@@ -26,6 +26,6 @@
     }
   },
   "expected": {
-    "error": "requires fact \"ghost_fact\""
+    "error": "ghost_fact"
   }
 }

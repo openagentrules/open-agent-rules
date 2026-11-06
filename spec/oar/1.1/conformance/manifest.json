@@ -2,6 +2,89 @@
   "spec_version": "1.1",
   "fixtures": [
     {
+      "id": "copy-does-not-affect-decision",
+      "file": "copy-does-not-affect-decision.json",
+      "title": "A copy-carrying rule does not displace the rule that wins",
+      "covers": [
+        "OAR-COPY-6"
+      ]
+    },
+    {
+      "id": "copy-double-canonical",
+      "file": "copy-double-canonical.json",
+      "title": "A double renders as the shortest round-tripping decimal",
+      "covers": [
+        "OAR-COPY-9"
+      ]
+    },
+    {
+      "id": "copy-host-fact-reached-through-requires-facts",
+      "file": "copy-host-fact-reached-through-requires-facts.json",
+      "title": "A host fact declared in requires_facts renders in copy",
+      "covers": [
+        "OAR-COPY-5",
+        "OAR-FACT-19"
+      ]
+    },
+    {
+      "id": "copy-malformed-construct-rejected",
+      "file": "copy-malformed-construct-rejected.json",
+      "title": "A copy construct outside the grammar is rejected by name",
+      "covers": [
+        "OAR-COPY-3"
+      ]
+    },
+    {
+      "id": "copy-non-core-fact-unreached-rejected",
+      "file": "copy-non-core-fact-unreached-rejected.json",
+      "title": "Copy naming a host fact the rule does not require is rejected at load",
+      "covers": [
+        "OAR-COPY-5"
+      ]
+    },
+    {
+      "id": "copy-non-interpolatable-type-rejected",
+      "file": "copy-non-interpolatable-type-rejected.json",
+      "title": "Copy binding a map fact is rejected at load",
+      "covers": [
+        "OAR-COPY-4"
+      ]
+    },
+    {
+      "id": "copy-renders-in-decision",
+      "file": "copy-renders-in-decision.json",
+      "title": "The winning rule's copy renders against the occurrence facts",
+      "covers": [
+        "OAR-COPY-1",
+        "OAR-COPY-7"
+      ]
+    },
+    {
+      "id": "copy-unknown-binding-rejected",
+      "file": "copy-unknown-binding-rejected.json",
+      "title": "Copy binding an undeclared fact is rejected at load",
+      "covers": [
+        "OAR-COPY-2"
+      ]
+    },
+    {
+      "id": "copy-whitespace-insignificant",
+      "file": "copy-whitespace-insignificant.json",
+      "title": "Whitespace inside a binding is permitted and insignificant",
+      "covers": [
+        "OAR-COPY-8"
+      ]
+    },
+    {
+      "id": "copy-zero-value-renders",
+      "file": "copy-zero-value-renders.json",
+      "title": "A fact at its zero value renders, it does not vanish",
+      "covers": [
+        "OAR-FACT-25",
+        "OAR-COPY-4"
+      ]
+    },
+    {
       "id": "detector-threshold-in-when",
       "file": "detector-threshold-in-when.json",
       "title": "A detector supplies a score and the rule owns the threshold",
@@ -218,11 +301,28 @@
       ]
     },
     {
+      "id": "fact-dyn-member-comparison-rejected",
+      "file": "fact-dyn-member-comparison-rejected.json",
+      "title": "A condition comparing a selected dyn member is rejected at load",
+      "covers": [
+        "OAR-FACT-22"
+      ]
+    },
+    {
       "id": "fact-non-boolean-condition-rejected",
       "file": "fact-non-boolean-condition-rejected.json",
       "title": "A condition that does not evaluate to a boolean is rejected at load",
       "covers": [
         "OAR-FACT-3"
+      ]
+    },
+    {
+      "id": "fact-non-finite-double-fails-provider",
+      "file": "fact-non-finite-double-fails-provider.json",
+      "title": "A double fact that is not finite routes the rule through on_error",
+      "covers": [
+        "OAR-FACT-17",
+        "OAR-OPS-2"
       ]
     },
     {
@@ -234,12 +334,28 @@
       ]
     },
     {
+      "id": "fact-type-outside-vocabulary-rejected",
+      "file": "fact-type-outside-vocabulary-rejected.json",
+      "title": "A host fact declared under a type outside the closed vocabulary is rejected",
+      "covers": [
+        "OAR-FACT-16"
+      ]
+    },
+    {
       "id": "fact-unknown-identifier-rejected",
       "file": "fact-unknown-identifier-rejected.json",
       "title": "A condition referencing an undeclared fact is rejected at load, naming it",
       "covers": [
         "OAR-FACT-2",
         "OAR-CONF-5"
+      ]
+    },
+    {
+      "id": "fact-value-type-violation-errored",
+      "file": "fact-value-type-violation-errored.json",
+      "title": "A fact value that violates its declared type is a provider failure, not a coercion",
+      "covers": [
+        "OAR-FACT-18"
       ]
     },
     {
@@ -291,6 +407,67 @@
       "covers": [
         "OAR-FACT-10",
         "OAR-DOC-10"
+      ]
+    },
+    {
+      "id": "hint-copy-must-be-static",
+      "file": "hint-copy-must-be-static.json",
+      "title": "Hint copy carrying a binding is rejected at load",
+      "covers": [
+        "OAR-HINT-3"
+      ]
+    },
+    {
+      "id": "hint-evaluation-field-rejected",
+      "file": "hint-evaluation-field-rejected.json",
+      "title": "A hint that carries a condition is rejected at load",
+      "covers": [
+        "OAR-HINT-1"
+      ]
+    },
+    {
+      "id": "hint-loads-and-does-not-perturb",
+      "file": "hint-loads-and-does-not-perturb.json",
+      "title": "A hint document loads beside rules and leaves every decision alone",
+      "covers": [
+        "OAR-HINT-1",
+        "OAR-HINT-6"
+      ]
+    },
+    {
+      "id": "hint-without-copy-rejected",
+      "file": "hint-without-copy-rejected.json",
+      "title": "A hint that publishes no copy is not a hint",
+      "covers": [
+        "OAR-HINT-2"
+      ]
+    },
+    {
+      "id": "host-fact-absent-reads-zero-value",
+      "file": "host-fact-absent-reads-zero-value.json",
+      "title": "A declared host fact absent from the occurrence reads as its zero value",
+      "covers": [
+        "OAR-FACT-24",
+        "OAR-FACT-25",
+        "OAR-COPY-3"
+      ]
+    },
+    {
+      "id": "host-int-fact-compares-as-int",
+      "file": "host-int-fact-compares-as-int.json",
+      "title": "An int host fact reached through a dotted select compares as an int",
+      "covers": [
+        "OAR-FACT-19",
+        "OAR-COPY-4"
+      ]
+    },
+    {
+      "id": "on-error-copy-omitted",
+      "file": "on-error-copy-omitted.json",
+      "title": "An on_error block whose copy cannot render stands without copy",
+      "covers": [
+        "OAR-COPY-10",
+        "OAR-FACT-23"
       ]
     },
     {
@@ -469,6 +646,23 @@
       "title": "A selector clause naming a dimension the host does not model does not match",
       "covers": [
         "OAR-SEL-6"
+      ]
+    },
+    {
+      "id": "stream-chunk-unsupported-rejected",
+      "file": "stream-chunk-unsupported-rejected.json",
+      "title": "An engine that does not implement chunked evaluation rejects the document",
+      "covers": [
+        "OAR-OPS-6"
+      ]
+    },
+    {
+      "id": "substitute-carries-copy",
+      "file": "substitute-carries-copy.json",
+      "title": "A substitute on_error block carries the substitute rule's rendered copy",
+      "covers": [
+        "OAR-OPS-4",
+        "OAR-COPY-7"
       ]
     }
   ]
