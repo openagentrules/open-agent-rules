@@ -2,7 +2,7 @@
 # that a clean load-time refusal instead of a mystery at run time ([OAR-DOC-23]):
 # a host without the `mcp` profile does not declare these facts, and the rule is
 # rejected with both names in the error.
-spec_version: "1.1"
+spec_version: "1.0"
 id: MCP_SERVER_DISABLED
 namespace: example.security
 kind: policy

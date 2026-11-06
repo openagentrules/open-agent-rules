@@ -13,7 +13,7 @@ if (!existsSync(built)) {
 }
 const { runCorpus } = await import(built);
 
-const dir = resolve(process.argv[2] ?? join(here, '..', '..', '..', 'spec', 'oar', '1.1', 'conformance'));
+const dir = resolve(process.argv[2] ?? join(here, '..', '..', '..', 'spec', 'oar', '1.0', 'conformance'));
 const report = await runCorpus(dir);
 for (const r of report.results) {
   console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.id}${r.pass ? '' : `\n        ${r.detail}`}`);

@@ -8,7 +8,7 @@ The Open Agent Rules **specification prose** is licensed under the
 
 This covers:
 
-- `1.1/open-agent-rules.md` — the normative specification
+- `1.0/open-agent-rules.md` — the normative specification
 - `RATIONALE.md`
 - `GOVERNANCE.md`
 - this file
@@ -20,8 +20,8 @@ Attribution line:
 
 ## Everything else is Apache-2.0
 
-The JSON Schemas (`1.1/schemas/*.json`), the observation vocabulary
-(`1.1/observations.yaml`), the conformance corpus (`1.1/conformance/*.json`), and all code are
+The JSON Schemas (`1.0/schemas/*.json`), the observation vocabulary
+(`1.0/vocabulary.yaml`), the conformance corpus (`1.0/conformance/*.json`), and all code are
 licensed under the Apache License, Version 2.0. See `LICENSE` in the repository root.
 
 ## Implementation grant

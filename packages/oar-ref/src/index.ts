@@ -1,4 +1,4 @@
-// Reference evaluator for Open Agent Rules 1.1.
+// Reference evaluator for Open Agent Rules 1.0.
 //
 // It is written from the published specification and passes the published
 // conformance corpus. It is normative-adjacent but not itself normative: where

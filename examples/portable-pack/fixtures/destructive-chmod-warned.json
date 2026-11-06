@@ -8,7 +8,7 @@
   ],
   "rule": [
     {
-      "spec_version": "1.1",
+      "spec_version": "1.0",
       "namespace": "example.security",
       "emit": "example:pack",
       "id": "DELETE_REFUSED",
@@ -23,7 +23,7 @@
       "profile": "portable"
     },
     {
-      "spec_version": "1.1",
+      "spec_version": "1.0",
       "namespace": "example.security",
       "emit": "example:pack",
       "id": "DESTRUCTIVE_TOOL_WARN",

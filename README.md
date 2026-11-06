@@ -6,9 +6,9 @@ effect. A conforming engine loads the document, evaluates the condition, and ren
 effect. The same document produces the same decision on every engine that provides the
 capabilities the document declares it needs.
 
-- **Specification** — <https://openagentrules.org/spec/1.1/>
-- **Schemas** — <https://openagentrules.org/spec/1.1/schemas.html>
-- **Conformance corpus** — <https://openagentrules.org/spec/1.1/conformance.html>
+- **Specification** — <https://openagentrules.org/spec/1.0/>
+- **Schemas** — <https://openagentrules.org/spec/1.0/schemas.html>
+- **Conformance corpus** — <https://openagentrules.org/spec/1.0/conformance.html>
 - **A worked rule pack** — <https://openagentrules.org/examples/portable-pack.html>
 - **The hint channel** — <https://openagentrules.org/examples/remedy-pack.html>
 
@@ -22,7 +22,7 @@ is at the URLs above.
 
 ## How to read it
 
-Start with [`spec/oar/1.1/open-agent-rules.md`](spec/oar/1.1/open-agent-rules.md). It is one
+Start with [`spec/oar/1.0/open-agent-rules.md`](spec/oar/1.0/open-agent-rules.md). It is one
 file. Sections 1 to 3 are the document model and how a rule is selected; sections 4 to 8 are
 what an engine does with it and what it may assume; section 9 is the hint channel, for
 presentation copy a host raises outside the guard pipeline; section 10.1 is the runner
@@ -38,7 +38,7 @@ Then:
   format, portable by construction.
 - [`examples/remedy-pack/`](examples/remedy-pack/) — the hint-channel pattern: rules whose
   copy binds a host fact, and hint documents a host raises by code.
-- [`spec/oar/1.1/vocabulary.yaml`](spec/oar/1.1/vocabulary.yaml) — the vocabulary in
+- [`spec/oar/1.0/vocabulary.yaml`](spec/oar/1.0/vocabulary.yaml) — the vocabulary in
   machine-readable form, if you would rather consume it than read it.
 
 ## Run the corpus against your own engine
@@ -47,7 +47,7 @@ The corpus is language-neutral JSON: one fixture per file, each declaring the ru
 input, and the decision a conforming engine must produce.
 
 ```bash
-curl -O https://openagentrules.org/spec/1.1/conformance/manifest.json
+curl -O https://openagentrules.org/spec/1.0/conformance/manifest.json
 ```
 
 Load the manifest, fetch and run each fixture it names through your evaluator, and compare
@@ -60,7 +60,7 @@ checkout, or at the published manifest URL and it fetches the fixtures itself:
 
 ```bash
 npm ci --prefix packages/oar-ref
-node packages/oar-ref/bin/oar-conformance.mjs spec/oar/1.1/conformance
+node packages/oar-ref/bin/oar-conformance.mjs spec/oar/1.0/conformance
 ```
 
 `packages/oar-ref` is one implementation of the runner, not the definition of it — the
@@ -160,7 +160,7 @@ see the [governance document](spec/oar/GOVERNANCE.md) for the exact line.
 The versioned source tree includes `release-manifest.json`, which identifies its
 exact file bytes with SHA-256 hashes. After changing a draft, run
 `task release:manifest` before rebuilding the site. `task release:check` verifies
-that identity; `task release:bundle` produces `dist/oar-1.1.tar` and its checksum.
+that identity; `task release:bundle` produces `dist/oar-1.0.tar` and its checksum.
 Archive members have fixed ordering, permissions, ownership, and timestamps.
 Consumers pin the source manifest and verify the same bytes before conformance.
 Publishing still requires the explicit version freeze; building a draft bundle

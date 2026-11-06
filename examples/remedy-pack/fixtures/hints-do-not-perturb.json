@@ -6,7 +6,7 @@
     "OAR-COPY-6"
   ],
   "rule": {
-    "spec_version": "1.1",
+    "spec_version": "1.0",
     "id": "RETRY_CAP_REFUSED",
     "namespace": "example.remedy",
     "kind": "policy",
@@ -28,7 +28,7 @@
   },
   "hints": [
     {
-      "spec_version": "1.1",
+      "spec_version": "1.0",
       "id": "TOOL_OUTPUT_SPILL_CAPPED",
       "namespace": "example.remedy",
       "kind": "hint",
@@ -40,7 +40,7 @@
       "fix": "Ask for the specific slice you need instead of the whole result."
     },
     {
-      "spec_version": "1.1",
+      "spec_version": "1.0",
       "id": "TOOL_OUTPUT_TRUNCATED",
       "namespace": "example.remedy",
       "kind": "hint",
@@ -52,7 +52,7 @@
       "fix": "Ask for the tail explicitly, or narrow the call so the result fits."
     },
     {
-      "spec_version": "1.1",
+      "spec_version": "1.0",
       "id": "WORKFLOW_PHASE_EXIT_REQUIRED",
       "namespace": "example.remedy",
       "kind": "hint",
@@ -64,7 +64,7 @@
       "fix": "Finish the phase's remaining steps, or ask the user to move the phase forward."
     },
     {
-      "spec_version": "1.1",
+      "spec_version": "1.0",
       "id": "SECRET_REDACTED_RECEIPT",
       "namespace": "example.remedy",
       "kind": "hint",

@@ -1,7 +1,7 @@
 # A portable rule pack
 
-Seven rules, across five files, that exercise most of Open Agent Rules 1.1 and are portable in
-the sense [`[OAR-DOC-24]`](../../spec/oar/1.1/open-agent-rules.md) records and section 8
+Seven rules, across five files, that exercise most of Open Agent Rules 1.0 and are portable in
+the sense [`[OAR-DOC-24]`](../../spec/oar/1.0/open-agent-rules.md) records and section 8
 defines: every anchor is a core anchor, and every fact comes from the `core` tier or from a
 standard profile the rule names in `requires_facts`. They run unchanged on any engine
 providing those facts.
@@ -22,9 +22,9 @@ interchange form, and the mapping is lossless (`[OAR-DOC-1]`).
 | [`profile.yaml`](profile.yaml) | The anchor profile map of the host these rules assume. |
 | `fixtures/` | Nine replays against the reference implementation, one per behaviour. |
 
-## What changed since the 1.0 edition of this pack
+## What changed since the draft edition of this pack
 
-- `oar:` became `spec_version: "1.1"`, and `anchor:` became `on:` (`[OAR-DOC-3]`,
+- `oar:` became `spec_version: "1.0"`, and `anchor:` became `on:` (`[OAR-DOC-3]`,
   `[OAR-SEL-1]`).
 - The `copy:` block is gone; `what`, `cause`, `why`, `fix`, `instead`, and `message` are
   fields of the rule itself (`[OAR-DOC-18]`, Appendix B).
@@ -54,7 +54,7 @@ of the format — move either number into the host and the policy becomes unrevi
 (`[OAR-FACT-5]`).
 
 **Ordering is the composition.** `destructive-tool.yaml` needs two rules where it looks like
-it needs one, and 1.0 needed `overrides` to make the pair behave. 1.1 instead guarantees the
+it needs one, and the draft needed `overrides` to make the pair behave. 1.0 instead guarantees the
 order: both rules are `policy` kind, so ascending id order evaluates `DELETE_REFUSED` first,
 and its block short-circuits the occurrence — a delete is refused outright, and the flag
 rule is never reached (`[OAR-EVAL-1]`, `[OAR-EVAL-3]`). `reject-run.yaml` leans on the same

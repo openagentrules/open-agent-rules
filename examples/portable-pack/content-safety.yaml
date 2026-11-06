@@ -7,7 +7,7 @@
 # Both rules name the facts they need in `requires_facts` ([OAR-DOC-23]), so a
 # host that does not run a content detector is refused this rule at load with
 # both names in the error, rather than meeting a default value at run time.
-spec_version: "1.1"
+spec_version: "1.0"
 id: INJECTION_FLAGGED
 namespace: example.security
 kind: detector
@@ -22,7 +22,7 @@ profile: portable
 what: The content scored as a probable injection attempt.
 fix: Treat the surrounding content as untrusted before acting on it.
 ---
-spec_version: "1.1"
+spec_version: "1.0"
 id: JAILBREAK_REFUSED
 namespace: example.security
 kind: detector

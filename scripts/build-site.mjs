@@ -11,7 +11,7 @@ import { renderMarkdown, escapeHtml } from './markdown.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CHECK = process.argv.includes('--check');
-const VERSION = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? '1.1';
+const VERSION = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? '1.0';
 
 const SPEC_ROOT = join(REPO, 'spec', 'oar');
 const SITE = join(REPO, 'site');

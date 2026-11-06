@@ -3,12 +3,12 @@
 # A rule targeting an unsupported anchor is refused at load.
 #
 # Revision 1.0 packed this together with the profiles, detectors, and limits a
-# host provides into a capability document. 1.1 keeps only the anchor map here:
+# host provides into a capability document. 1.0 keeps only the anchor map here:
 # the facts a rule may name are declared by the engine's fact environment
 # (section 5), and a rule that needs a fact the host lacks names it in
 # `requires_facts` ([OAR-DOC-23]).
 
-oar_profile_version: "1.1"
+oar_profile_version: "1.0"
 core:
   tool.pre_invoke: tool.pre_invoke
   tool.handler: tool.handler

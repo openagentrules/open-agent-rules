@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 const Ajv2020 = require('ajv/dist/2020');
 
 const pkgRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const schemaDir = resolve(pkgRoot, '../../spec/oar/1.1/schemas');
+const schemaDir = resolve(pkgRoot, '../../spec/oar/1.0/schemas');
 // A pack is a directory with a fixtures/ member. An argument that names a
 // directory of packs (no fixtures/ of its own) expands to its pack children.
 function expandPack(p) {

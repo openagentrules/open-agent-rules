@@ -10,13 +10,13 @@ Instructions and guidelines for AI coding assistants and contributors working in
 
 ## 2. Directory Structure & Sources of Truth
 
-- `spec/oar/1.1/`: The canonical, hand-authored specification files for the current version:
+- `spec/oar/1.0/`: The canonical, hand-authored specification files for the current version:
   - `open-agent-rules.md`: Normative specification prose.
   - `vocabulary.yaml`: Machine-readable registry of core facts, standard profiles, core anchors, and the reserved detector references.
   - `schemas/`: JSON Schemas defining the document models (`oar.schema.json`, `selector.schema.json`, `oar-profile.schema.json`).
   - `conformance/`: The language-neutral JSON test corpus (one fixture per file) plus `manifest.json` and `exempt.json`.
   - `clause-index.json`: Released clause identifiers list.
-- `spec/oar/1.0/`: The published 1.0 tree. **Immutable** — a published version is never edited; a correction ships as a new version.
+- A version tree becomes **immutable when it is published** (frozen via `scripts/freeze-spec.sh`); a correction ships as a new version. The current version tree (`spec/oar/1.0/`) is editable until it is frozen.
 - `spec/oar/GOVERNANCE.md`: Seed specification guidelines, intellectual property commitments, and standards body transition plan.
 - `spec/oar/RATIONALE.md`: Architectural decisions and trade-offs.
 - `spec/oar/PATENTS.md`: The patent non-assertion covenant.
@@ -38,10 +38,10 @@ Every normative requirement is developed with three cohesive parts:
 1. Clauses use identifiers of the form `[OAR-<AREA>-<n>]` (e.g. `[OAR-DOC-5]`).
 2. Update `vocabulary.yaml` if introducing facts, profiles, or actions.
 3. Update schemas in `schemas/` if syntax or structure changes.
-4. Add or update fixtures in `spec/oar/1.1/conformance/`.
+4. Add or update fixtures in `spec/oar/1.0/conformance/`.
 5. Update `clause-index.json` when adding clauses:
    ```bash
-   node scripts/check-clauses.mjs --write 1.1
+   node scripts/check-clauses.mjs --write 1.0
    ```
 6. Run `task check` to verify consistency.
 
@@ -49,11 +49,11 @@ Every normative requirement is developed with three cohesive parts:
 
 Run verification commands through `task` (or directly via Node/npm):
 
-- `task spec:vocab:check` (`node scripts/check-vocab.mjs 1.1`): Vocabulary tables in markdown match `vocabulary.yaml`.
-- `task spec:clauses:check` (`node scripts/check-clauses.mjs 1.1`): Clause identifiers are unique and cross-references resolve.
-- `task schema:check` (`node scripts/check-schemas.mjs 1.1`): Schemas parse and resolve `$ref`s.
-- `task spec:coverage:check` (`node scripts/check-coverage.mjs 1.1`): Every normative MUST clause is covered by a fixture or documented in `exempt.json`.
-- `task site:check` (`node scripts/build-site.mjs 1.1 && node scripts/check-site.mjs`): Rebuilds `site/` and validates links/JSON.
+- `task spec:vocab:check` (`node scripts/check-vocab.mjs 1.0`): Vocabulary tables in markdown match `vocabulary.yaml`.
+- `task spec:clauses:check` (`node scripts/check-clauses.mjs 1.0`): Clause identifiers are unique and cross-references resolve.
+- `task schema:check` (`node scripts/check-schemas.mjs 1.0`): Schemas parse and resolve `$ref`s.
+- `task spec:coverage:check` (`node scripts/check-coverage.mjs 1.0`): Every normative MUST clause is covered by a fixture or documented in `exempt.json`.
+- `task site:check` (`node scripts/build-site.mjs 1.0 && node scripts/check-site.mjs`): Rebuilds `site/` and validates links/JSON.
 - `task ref:test`: Runs unit tests in `packages/oar-ref`.
 - `task conformance`: Runs the conformance fixtures against `packages/oar-ref`.
 - `task pack:lint`: Lints example rule packs.
@@ -62,7 +62,7 @@ Run verification commands through `task` (or directly via Node/npm):
 ## 5. What NOT To Do
 
 - **Do NOT commit `site/` artifacts:** The static site is fully generated. Never commit generated HTML files to Git.
-- **Do NOT edit `spec/oar/1.0/`:** A published version tree is immutable; corrections ship as a new version.
+- **Do NOT edit a frozen version tree:** Once a version is published (frozen via `scripts/freeze-spec.sh`), its tree is immutable; corrections ship as a new version. The current version tree (`spec/oar/1.0/`) is editable until it is frozen.
 - **Do NOT re-hash release manifests on routine commits:** `release-manifest.json` and `dist/` tarballs are for tagged releases, not routine drafting commits.
 - **Do NOT invent multi-stakeholder submission hurdles:** Avoid phrases like "two independent implementers required before proposing" or "proposals without fixtures will be rejected by the committee." Frame guidelines around software engineering quality and test coverage.
 - **Do NOT bypass schema or fixture validation:** When changing engine semantics, always verify against the reference runner and conformance suite.

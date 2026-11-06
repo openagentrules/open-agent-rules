@@ -46,7 +46,7 @@ the callback model with extra syntax.
 ## One rule, annotated (non-normative)
 
 ```yaml
-spec_version: "1.1"             # format version
+spec_version: "1.0"             # format version
 id: READ_OUTSIDE_SCOPE          # stable; the identifier the decision carries
 namespace: acme.security        # publisher scope; identity is (namespace, id)
 kind: policy                    # fixes evaluation order, nothing else
@@ -71,10 +71,10 @@ in copy still produce the same decision.
 happens*, including when the check itself fails. `requires_facts` is the line that makes
 portability computable: a reader can tell from the document alone which engines will run it,
 without consulting any of them. Clause references:
-[`[OAR-SEL-1]`](https://openagentrules.org/spec/1.1/#3-anchors-and-selection),
-[`[OAR-EVAL-4]`](https://openagentrules.org/spec/1.1/#4-evaluation),
-[`[OAR-DOC-23]`](https://openagentrules.org/spec/1.1/#2-1-fields-added-in-1-1),
-[`[OAR-OPS-2]`](https://openagentrules.org/spec/1.1/#7-operational-semantics).
+[`[OAR-SEL-1]`](https://openagentrules.org/spec/1.0/#3-anchors-and-selection),
+[`[OAR-EVAL-4]`](https://openagentrules.org/spec/1.0/#4-evaluation),
+[`[OAR-DOC-23]`](https://openagentrules.org/spec/1.0/#2-1-optional-fields),
+[`[OAR-OPS-2]`](https://openagentrules.org/spec/1.0/#7-operational-semantics).
 
 ## Why not Rego, or Cedar
 
@@ -155,8 +155,8 @@ A model gateway with no file system would still have to publish `is_directory`, 
 `false` forever. A rule written against it would load, evaluate, and mean nothing while the
 operator sees a passing conformance run.
 
-1.1 answers with tiers instead of a catalogue
-([`[OAR-FACT-11]`](https://openagentrules.org/spec/1.1/#5-1-fact-tiers)). A `core` fact is one
+1.0 answers with tiers instead of a catalogue
+([`[OAR-FACT-11]`](https://openagentrules.org/spec/1.0/#5-1-fact-tiers)). A `core` fact is one
 every conforming engine provides ([`[OAR-FACT-12]`]). A `standard` fact belongs to a named
 profile — content safety, MCP — that an engine provides whole or not at all
 ([`[OAR-FACT-13]`]). A `host` fact is the engine's own observation, published under a
@@ -166,10 +166,10 @@ namespace it owns so that two engines cannot collide on a bare name
 The rule's side of the contract is `requires_facts`
 ([`[OAR-DOC-23]`]): the rule names the facts it needs, and an engine that does not provide one
 of them rejects the rule at load
-([`[OAR-CONF-4]`](https://openagentrules.org/spec/1.1/#10-conformance)) rather than failing
+([`[OAR-CONF-4]`](https://openagentrules.org/spec/1.0/#10-conformance)) rather than failing
 condition compilation or evaluating a default. A rule is *portable* — the word the format
 commits to — when its anchor is a core anchor and its facts come from the core and standard
-tiers ([`[OAR-PROF-5]`](https://openagentrules.org/spec/1.1/#8-portability-profiles)); the
+tiers ([`[OAR-PROF-5]`](https://openagentrules.org/spec/1.0/#8-portability-profiles)); the
 host publishes an anchor profile map saying which core anchors it supports
 ([`[OAR-PROF-2]`]), so the same negotiation covers the moments, not only the facts.
 
@@ -203,7 +203,7 @@ exactly like a working scope.
 
 A selector clause names a declared fact, and an engine rejects at load a clause naming a
 fact it does not declare
-([`[OAR-SEL-3]`](https://openagentrules.org/spec/1.1/#3-anchors-and-selection)). There is no
+([`[OAR-SEL-3]`](https://openagentrules.org/spec/1.0/#3-anchors-and-selection)). There is no
 second vocabulary to keep in sync, no clause without a type, and no way to write a scoping
 clause an engine will quietly ignore. The failure moved from runtime silence to a load error
 that names the clause, which is the only kind of failure an operator can act on.
@@ -215,7 +215,7 @@ they combine, and it does so with three sentences rather than a negotiation mech
 
 The order is fixed: ascending by `kind` in the sequence `schema`, `policy`, `invariant`,
 `detector`, then ascending lexicographically by `id`
-([`[OAR-EVAL-1]`](https://openagentrules.org/spec/1.1/#4-evaluation)). The first rule that
+([`[OAR-EVAL-1]`](https://openagentrules.org/spec/1.0/#4-evaluation)). The first rule that
 fires with `block` or `transform` short-circuits the occurrence
 ([`[OAR-EVAL-3]`]). What survives short-circuit resolves by precedence: `block`, then `nudge`,
 then `warn`, then the occurrence is allowed ([`[OAR-EVAL-4]`]).
@@ -229,13 +229,13 @@ misconfigure, and without a graph to cycle.
 
 Nothing that fired is silently dropped. Every selected rule leaves its identifier and outcome
 — fired, passed, errored, or monitored — on the applied-rules trace
-([`[OAR-OPS-7]`](https://openagentrules.org/spec/1.1/#7-operational-semantics)), which is how
+([`[OAR-OPS-7]`](https://openagentrules.org/spec/1.0/#7-operational-semantics)), which is how
 an operator audits a decision. The decision names the winner; the trace is the full story.
 A `monitor` rule is recorded on the same trace and produces no effect
 ([`[OAR-OPS-1]`]), which is the rollout path: watch a rule in production before enforcing it.
 
 The same reasoning retired the advisory list. When several nudges and warnings hold of one
-occurrence, 1.0 carried them all on an `advisories` list; 1.1 resolves one decision by
+occurrence, earlier drafts carried them all on an `advisories` list; 1.0 resolves one decision by
 precedence and records the rest on the trace. A consumer that branches on a single identifier
 has one; an operator who wants the rest reads the trace. Two surfaces, each doing one job,
 instead of one surface doing both.
@@ -244,7 +244,7 @@ instead of one surface doing both.
 
 Copy — `what`, `cause`, `why`, `fix`, `instead`, `message` — is presentation, and the format
 freezes its grammar so a rule's words mean the same thing on every engine
-([Appendix B](https://openagentrules.org/spec/1.1/#appendix-b-copy-bindings-normative)).
+([Appendix B](https://openagentrules.org/spec/1.0/#appendix-b-copy-bindings-normative)).
 A binding `{{ fact }}` names a declared fact, and a mistyped name is a load failure, never a
 runtime default ([`[OAR-COPY-2]`]). A conditional `{% if fact %}…{% else %}…{% endif %}`
 branches on the fact's zero value ([`[OAR-COPY-3]`]). An engine rejects at load any binding
@@ -252,12 +252,12 @@ or construct the grammar does not derive, so copy cannot grow a host template di
 accident.
 
 The zero-value semantics are the part worth reading twice. Every declared fact has a value at
-every occurrence ([`[OAR-FACT-25]`](https://openagentrules.org/spec/1.1/#5-5-fact-semantics)),
+every occurrence ([`[OAR-FACT-25]`](https://openagentrules.org/spec/1.0/#5-5-fact-semantics)),
 and a zero value is a value, not an absence ([`[OAR-FACT-24]`]). So a binding at zero
 substitutes the zero — "applied 0 redactions", not a gap — and a conditional on an unreported
 bool takes its else branch. Copy *reads correctly when empty*: the sentence parses, the member
 stays present, and the decision is unchanged ([`[OAR-COPY-7]`],
-[`[OAR-COPY-6]`](https://openagentrules.org/spec/1.1/#appendix-b-copy-bindings-normative)).
+[`[OAR-COPY-6]`](https://openagentrules.org/spec/1.0/#appendix-b-copy-bindings-normative)).
 A fact named in copy is reached through `requires_facts` like any other
 ([`[OAR-COPY-5]`]) — copy is presentation, not an exemption from the portability contract.
 
@@ -268,13 +268,13 @@ pipeline: a tool output capped before it reached the model, a result truncated a
 limit, a workflow phase that must exit first, a secret redacted on the way out. The guard
 pipeline has no fact for them — they are not observations at a lifecycle moment it evaluates —
 so no rule can read them, and neither `enforce` nor `monitor` fits: there is nothing to
-enforce. The 1.0 edition published such copy as `enforcement: off` rules, which made every
+enforce. Earlier drafts published such copy as `enforcement: off` rules, which made every
 engine carry a rule-shaped object whose only live field was its prose.
 
-1.1 removes `off` and makes the channel first-class: the *hint*
-([section 9](https://openagentrules.org/spec/1.1/#9-the-hint-channel)). A hint is a document
+1.0 instead makes the channel first-class: the *hint*
+([section 9](https://openagentrules.org/spec/1.0/#9-the-hint-channel)). A hint is a document
 whose `kind` is `hint` and whose payload is copy
-([`[OAR-HINT-1]`](https://openagentrules.org/spec/1.1/#9-the-hint-channel)). Its `id` is the
+([`[OAR-HINT-1]`](https://openagentrules.org/spec/1.0/#9-the-hint-channel)). Its `id` is the
 code the host raises ([`[OAR-HINT-2]`]); its copy is static, because there is no occurrence to
 bind against ([`[OAR-HINT-3]`]); and it never evaluates — loading one changes no decision and
 no copy ([`[OAR-HINT-6]`]).
@@ -300,14 +300,14 @@ relationship needs three answers: watch before enforcing, keep a rule nobody may
 and disable the rest without forking the pack.
 
 Watching is `enforcement: monitor`
-([`[OAR-OPS-1]`](https://openagentrules.org/spec/1.1/#7-operational-semantics)): the rule
+([`[OAR-OPS-1]`](https://openagentrules.org/spec/1.0/#7-operational-semantics)): the rule
 evaluates, the outcome lands on the trace, and no effect is produced. It is the only mode
 besides `enforce` — 1.0's `off` is gone, and its legitimate use split into the two mechanisms
 that actually needed it: copy publication became the hint channel, and disabling a rule is
 removing it from the loaded set, which an operator can always do to a non-mandatory rule.
 
 Keeping a rule is `mandatory: true`
-([`[OAR-OPS-5]`](https://openagentrules.org/spec/1.1/#7-operational-semantics)): an engine
+([`[OAR-OPS-5]`](https://openagentrules.org/spec/1.0/#7-operational-semantics)): an engine
 MUST reject a configuration that disables, overrides, or removes it. The line exists because
 the rules an operator most wants to switch off mid-incident are the ones the pack author
 staked the pack's meaning on.
@@ -327,9 +327,9 @@ site drop one rule out of a pack it does not otherwise maintain.
 ## Rejecting what it does not know
 
 An engine rejects a document carrying a field this specification does not define
-([`[OAR-DOC-20]`](https://openagentrules.org/spec/1.1/#2-1-fields-added-in-1-1)), and rejects
+([`[OAR-DOC-20]`](https://openagentrules.org/spec/1.0/#2-1-optional-fields)), and rejects
 a document whose `spec_version` major it does not support before any other processing
-([`[OAR-CONF-2]`](https://openagentrules.org/spec/1.1/#10-conformance)). This is the opposite
+([`[OAR-CONF-2]`](https://openagentrules.org/spec/1.0/#10-conformance)). This is the opposite
 of the usual advice, and the usual advice is usually right.
 
 Protocol Buffers is the cautionary tale in the other direction. proto3 originally dropped
@@ -349,7 +349,7 @@ the engine's point of view nothing happened.
 
 Refusing to load is the only failure mode an operator can see. The cost is that one document
 cannot target a fleet running mixed minors, which
-[`[OAR-DOC-26]`](https://openagentrules.org/spec/1.1/#11-extensibility-and-versioning) bounds
+[`[OAR-DOC-26]`](https://openagentrules.org/spec/1.0/#11-extensibility-and-versioning) bounds
 by making every minor revision additive: a document written for an earlier minor of the same
 major remains valid. Extension fields that an engine must ignore are spelled `x-`, and
 nothing else gets that grace.
@@ -387,8 +387,8 @@ place, under a declared name, with a declared type.
 Two commands:
 
 ```bash
-curl -O https://openagentrules.org/spec/1.1/oar.schema.json
-npx @openagentrules/oar-ref https://openagentrules.org/spec/1.1/conformance/manifest.json
+curl -O https://openagentrules.org/spec/1.0/oar.schema.json
+npx @openagentrules/oar-ref https://openagentrules.org/spec/1.0/conformance/manifest.json
 ```
 
 Given the manifest URL, the reference runner fetches every fixture the manifest names and
@@ -397,7 +397,7 @@ fixture, and a baseline fixture may not be skipped at all. Point it at a local d
 instead and it fetches nothing.
 
 Read the numbered runner algorithm in
-[section 10.1](https://openagentrules.org/spec/1.1/#10-1-the-runner-algorithm) of the
+[section 10.1](https://openagentrules.org/spec/1.0/#10-1-the-runner-algorithm) of the
 specification, implement it, and run the corpus. Every fixture names the clauses it exercises,
 so a failure tells you which sentence you and the specification disagree about. If you conclude
 the specification is wrong, open an issue quoting the clause id — that is what they are for.

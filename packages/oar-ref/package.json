@@ -1,7 +1,7 @@
 {
   "name": "@openagentrules/oar-ref",
-  "version": "1.1.0",
-  "description": "Reference evaluator for Open Agent Rules 1.1. Zero runtime dependencies.",
+  "version": "1.0.0",
+  "description": "Reference evaluator for Open Agent Rules 1.0. Zero runtime dependencies.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": { "node": ">=22" },
@@ -12,7 +12,7 @@
   "scripts": {
     "build": "tsc -p .",
     "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
-    "conformance": "npm run build && node bin/oar-conformance.mjs ../../spec/oar/1.1/conformance",
+    "conformance": "npm run build && node bin/oar-conformance.mjs ../../spec/oar/1.0/conformance",
     "lint:pack": "npm run build && node bin/lint-pack.mjs ../../examples"
   },
   "devDependencies": {

@@ -162,5 +162,5 @@ export interface AnchorProfile {
 export function referenceAnchorProfile(): AnchorProfile {
   const core: Record<string, string> = {};
   for (const id of CORE_ANCHORS) core[id] = id;
-  return { version: '1.1', core, unsupported: [] };
+  return { version: '1.0', core, unsupported: [] };
 }

@@ -105,7 +105,7 @@ and the specification says so rather than pretending otherwise.
 
 ### The extension registry
 
-[`1.1/EXTENSIONS.md`](1.1/EXTENSIONS.md) records the `x-` extensions implementations have
+[`1.0/EXTENSIONS.md`](1.0/EXTENSIONS.md) records the `x-` extensions implementations have
 published, so an author who meets `x-acme-runbook` in someone else's pack can find out what it
 means, and so two vendors do not independently choose the same name.
 

@@ -7,10 +7,10 @@ This directory is the source of truth for the standard. Everything published at
 
 | File | What it is | Licence |
 |------|------------|---------|
-| [`1.1/open-agent-rules.md`](1.1/open-agent-rules.md) | The normative specification. Every requirement carries a clause identifier. | CC BY 4.0 |
-| [`1.1/schemas/`](1.1/schemas/) | The five JSON Schemas, carrying their canonical `$id`s. Inter-schema `$ref`s are relative filenames, so the set resolves from the published URLs and from a local directory alike. | Apache-2.0 |
-| [`1.1/conformance/`](1.1/conformance/) | The conformance corpus: one JSON fixture per file, plus the generated `manifest.json` and the `exempt.json` justification list. | Apache-2.0 |
-| [`1.1/observations.yaml`](1.1/observations.yaml) | The meaning half of the published core and standard vocabulary tables. | Apache-2.0 |
+| [`1.0/open-agent-rules.md`](1.0/open-agent-rules.md) | The normative specification. Every requirement carries a clause identifier. | CC BY 4.0 |
+| [`1.0/schemas/`](1.0/schemas/) | The five JSON Schemas, carrying their canonical `$id`s. Inter-schema `$ref`s are relative filenames, so the set resolves from the published URLs and from a local directory alike. | Apache-2.0 |
+| [`1.0/conformance/`](1.0/conformance/) | The conformance corpus: one JSON fixture per file, plus the generated `manifest.json` and the `exempt.json` justification list. | Apache-2.0 |
+| [`1.0/observations.yaml`](1.0/observations.yaml) | The meaning half of the published core and standard vocabulary tables. | Apache-2.0 |
 | [`RATIONALE.md`](RATIONALE.md) | Why the format exists, and why not Rego, Cedar, or a callback API. | CC BY 4.0 |
 | [`GOVERNANCE.md`](GOVERNANCE.md) | Version policy, the one-change rule, clause-identifier policy, compatibility classes, naming. | CC BY 4.0 |
 | [`LICENCE-SPEC.md`](LICENCE-SPEC.md) | Which licence covers which file, and the implementation grant. | CC BY 4.0 |
@@ -32,7 +32,7 @@ npx @openagentrules/oar-ref ./conformance
 
 The prose, the schemas, the observation vocabulary, and every fixture are **hand-authored
 here**. Two files inside this tree are generated because they are projected from it:
-`1.1/conformance/manifest.json` and `clause-index.json`.
+`1.0/conformance/manifest.json` and `clause-index.json`.
 
 A change lands the clause, the schema edit, and at least one fixture together — see
 [`GOVERNANCE.md`](GOVERNANCE.md).

@@ -9,9 +9,10 @@
 // gate parses both and compares them row by row.
 //
 // The markdown is delimited by comment markers:
-//   <!-- oar:table core -->     ... <!-- /oar:table -->
-//   <!-- oar:table profiles -->  ... <!-- /oar:table -->
-//   <!-- oar:table anchors -->   ... <!-- /oar:table -->
+//   <!-- oar:table core-facts -->        ... <!-- /oar:table -->
+//   <!-- oar:table core-functions -->    ... <!-- /oar:table -->
+//   <!-- oar:table standard-profiles --> ... <!-- /oar:table -->
+//   <!-- oar:table core-anchors -->      ... <!-- /oar:table -->
 //
 // Two normalisations are applied before comparing, and only two:
 //   * backticks are stripped from markdown cells — the prose marks identifiers
@@ -127,42 +128,43 @@ function compareFacts(md, facts, where, header) {
 }
 
 // --- 5.2/5.3 core facts and functions ---------------------------------------
-// 1.0 prints one core table; 1.1 splits it into a fact table and a function
-// table under distinct markers.
+// The specification prints a fact table and a function table under distinct
+// markers.
 
-const CORE_MARKERS = VERSION === '1.0' ? ['core'] : ['core-facts'];
-const coreBlock = CORE_MARKERS.map(block).find((b) => b !== null);
-if (coreBlock === undefined) {
-  fail(`no <!-- oar:table ${CORE_MARKERS[0]} --> block in the specification`);
+const coreBlock = block('core-facts');
+if (coreBlock === null) {
+  fail('no <!-- oar:table core-facts --> block in the specification');
 } else {
-  const header = VERSION === '1.0' ? ['Name', 'Type', 'Observation'] : ['Fact', 'Type', 'Observation'];
-  compareFacts(table(coreBlock, 'core table'), vocab.core.facts, 'core table', header);
+  compareFacts(
+    table(coreBlock, 'core facts table'),
+    vocab.core.facts,
+    'core facts table',
+    ['Fact', 'Type', 'Observation'],
+  );
 }
 
-if (VERSION !== '1.0') {
-  const functionsBlock = block('core-functions');
-  if (functionsBlock === null) {
-    fail('no <!-- oar:table core-functions --> block in the specification');
-  } else {
-    compareFacts(
-      table(functionsBlock, 'core functions table'),
-      vocab.core.functions ?? [],
-      'core functions table',
-      ['Function', 'Signature', 'Observation'],
-    );
-  }
+const functionsBlock = block('core-functions');
+if (functionsBlock === null) {
+  fail('no <!-- oar:table core-functions --> block in the specification');
+} else {
+  compareFacts(
+    table(functionsBlock, 'core functions table'),
+    vocab.core.functions ?? [],
+    'core functions table',
+    ['Function', 'Signature', 'Observation'],
+  );
 }
 
 // --- 5.4 standard profiles --------------------------------------------------
 
-const PROFILE_MARKERS = VERSION === '1.0' ? ['profiles'] : ['standard-profiles'];
-const profilesBlock = PROFILE_MARKERS.map(block).find((b) => b !== null);
-if (profilesBlock === undefined) {
-  fail(`no <!-- oar:table ${PROFILE_MARKERS[0]} --> block in the specification`);
+const profilesBlock = block('standard-profiles');
+if (profilesBlock === null) {
+  fail('no <!-- oar:table standard-profiles --> block in the specification');
 } else {
   // Each profile is a `**Profile \`name\`** — description` line followed by a
-  // table. The description is optional (1.1 prints the bare heading); when
-  // present in both, it is compared. Split on the heading lines so a missing
+  // table. The description is optional (the spec prints the bare heading when
+  // a profile has none); when present in both, it is compared. Split on the
+  // heading lines so a missing
   // or reordered profile shows up as a name mismatch rather than a silently
   // ignored section.
   const chunks = [];
@@ -210,10 +212,9 @@ if (profilesBlock === undefined) {
 
 // --- 8.1 core anchors -------------------------------------------------------
 
-const ANCHOR_MARKERS = VERSION === '1.0' ? ['anchors'] : ['core-anchors'];
-const anchorsBlock = ANCHOR_MARKERS.map(block).find((b) => b !== null);
-if (anchorsBlock === undefined) {
-  fail(`no <!-- oar:table ${ANCHOR_MARKERS[0]} --> block in the specification`);
+const anchorsBlock = block('core-anchors');
+if (anchorsBlock === null) {
+  fail('no <!-- oar:table core-anchors --> block in the specification');
 } else {
   const md = table(anchorsBlock, 'anchors table');
   const declared = vocab.anchors ?? [];

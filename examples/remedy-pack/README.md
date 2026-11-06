@@ -1,13 +1,13 @@
 # The hint channel — a remedy pack
 
-The 1.1-native pattern for remedy copy: rules whose copy binds a host fact, and hint
+The 1.0-native pattern for remedy copy: rules whose copy binds a host fact, and hint
 documents a host raises by code. It exists because the guard pipeline decides from typed
 facts at lifecycle moments, and some situations a host handles — a capped tool output, a
 truncated result, a phase gate, a redaction receipt — are observed by the host's own
 machinery, not by the guard pipeline. No fact exists for a rule to read, so neither
-`enforce` nor `monitor` fits: there is nothing to enforce. The 1.0 edition published such
-copy as `enforcement: off` rules; 1.1 removes `off` and makes the channel first-class —
-the hint (section 9, [`[OAR-HINT-1]`](../../spec/oar/1.1/open-agent-rules.md)).
+`enforce` nor `monitor` fits: there is nothing to enforce. Earlier drafts published such
+copy as `enforcement: off` rules; 1.0 removes `off` and makes the channel first-class —
+the hint (section 9, [`[OAR-HINT-1]`](../../spec/oar/1.0/open-agent-rules.md)).
 
 | File | What it demonstrates |
 |------|----------------------|
@@ -32,7 +32,7 @@ is portable to any engine whose host provides the same facts.
 
 ## The hint half: copy keyed by a code
 
-`hints.yaml` carries four hints — the 1.1-native shape of the painted-wolf pack's
+`hints.yaml` carries four hints — the 1.0-native shape of the painted-wolf pack's
 enforcement-off units. A hint is a copy publication, not a rule:
 
 - it never evaluates — no `when`, no `effect`, no side-effects ([`[OAR-HINT-1]`]);

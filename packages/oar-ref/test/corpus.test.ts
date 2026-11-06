@@ -37,8 +37,8 @@ function repoRoot(from: string): string {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const REPO = repoRoot(here);
-const CORPUS = join(REPO, 'spec', 'oar', '1.1', 'conformance');
-const SCHEMAS = join(REPO, 'spec', 'oar', '1.1', 'schemas');
+const CORPUS = join(REPO, 'spec', 'oar', '1.0', 'conformance');
+const SCHEMAS = join(REPO, 'spec', 'oar', '1.0', 'schemas');
 
 test('the published corpus passes end to end', async () => {
   const fixtures = await loadFixtures(CORPUS);
@@ -53,7 +53,7 @@ test('the published corpus passes end to end', async () => {
 test('the manifest and the corpus directory describe the same fixtures', async () => {
   const manifest = await loadManifest(CORPUS);
   const fixtures = await loadFixtures(CORPUS);
-  assert.equal(manifest.spec_version, '1.1');
+  assert.equal(manifest.spec_version, '1.0');
   assert.deepEqual(
     manifest.fixtures.map((f) => f.id).sort(),
     fixtures.map((f) => f.id).sort(),
@@ -105,7 +105,7 @@ test('constructs outside the declared subset are refused by name', () => {
 
 test('an undeclared fact is rejected at load, before any evaluation', () => {
   const doc = {
-    spec_version: '1.1', id: 'GHOST', kind: 'policy', on: 'tool.pre_invoke',
+    spec_version: '1.0', id: 'GHOST', kind: 'policy', on: 'tool.pre_invoke',
     selector: {}, effect: 'block', when: 'ghost_fact',
   };
   assert.throws(
@@ -120,7 +120,7 @@ test('an undeclared fact is rejected at load, before any evaluation', () => {
 
 test('a condition that is not boolean is rejected at load', () => {
   const doc = {
-    spec_version: '1.1', id: 'NOT_BOOL', kind: 'policy', on: 'tool.pre_invoke',
+    spec_version: '1.0', id: 'NOT_BOOL', kind: 'policy', on: 'tool.pre_invoke',
     selector: {}, effect: 'block', when: 'tool',
   };
   assert.throws(
@@ -169,7 +169,7 @@ test('copy bindings render against the occurrence facts', () => {
 
 test('copy bindings are validated at load', () => {
   const base = {
-    spec_version: '1.1', id: 'R', kind: 'policy', on: 'tool.pre_invoke',
+    spec_version: '1.0', id: 'R', kind: 'policy', on: 'tool.pre_invoke',
     selector: {}, effect: 'block', when: 'tool == "x"',
   };
   // [OAR-COPY-2] an unknown binding is a load failure naming the identifier.
@@ -189,7 +189,7 @@ test('copy bindings are validated at load', () => {
 
 test('a non-core fact named only in copy must be reached through requires_facts', () => {
   const base = {
-    spec_version: '1.1', id: 'R', kind: 'policy', on: 'tool.pre_invoke',
+    spec_version: '1.0', id: 'R', kind: 'policy', on: 'tool.pre_invoke',
     selector: {}, effect: 'block', when: 'tool == "x"',
   };
   assert.throws(
@@ -209,7 +209,7 @@ test('a non-core fact named only in copy must be reached through requires_facts'
 test('copy does not affect selection or the decision ([OAR-COPY-6])', () => {
   const mk = (what: string) => loadRule(
     {
-      spec_version: '1.1', id: 'R', kind: 'policy', on: 'tool.pre_invoke',
+      spec_version: '1.0', id: 'R', kind: 'policy', on: 'tool.pre_invoke',
       selector: {}, effect: 'block', when: 'tool == "shell"', what,
     },
     LOADOPTS,
@@ -227,7 +227,7 @@ test('copy does not affect selection or the decision ([OAR-COPY-6])', () => {
 test('an on_error block omits copy whose observation failed ([OAR-COPY-10])', () => {
   const rule = loadRule(
     {
-      spec_version: '1.1', id: 'R', kind: 'policy', on: 'tool.pre_invoke', selector: {},
+      spec_version: '1.0', id: 'R', kind: 'policy', on: 'tool.pre_invoke', selector: {},
       effect: 'block', when: 'prompt_injection_score > 0.5', on_error: 'fail_closed',
       what: 'errors: {{ arg_validation_errors }}',
     },
@@ -249,14 +249,14 @@ test('an on_error block omits copy whose observation failed ([OAR-COPY-10])', ()
 test('a substitute on_error block carries the substitute rule\'s copy', () => {
   const sub = loadRule(
     {
-      spec_version: '1.1', id: 'SUB', kind: 'policy', on: 'tool.pre_invoke', selector: {},
+      spec_version: '1.0', id: 'SUB', kind: 'policy', on: 'tool.pre_invoke', selector: {},
       effect: 'block', when: 'tool == "nope"', what: 'substitute for {{ tool }}',
     },
     LOADOPTS,
   );
   const bad = loadRule(
     {
-      spec_version: '1.1', id: 'BAD', kind: 'policy', on: 'tool.pre_invoke', selector: {},
+      spec_version: '1.0', id: 'BAD', kind: 'policy', on: 'tool.pre_invoke', selector: {},
       effect: 'block', when: 'prompt_injection_score > 0.5', on_error: 'SUB',
       what: 'bad {{ arg_validation_errors }}',
     },
@@ -275,20 +275,20 @@ test('a substitute on_error block carries the substitute rule\'s copy', () => {
 
 test('a hint loads as a copy publication and rejects evaluation fields', () => {
   const hint = loadHint({
-    spec_version: '1.1', id: 'TOOL_OUTPUT_SPILL_CAPPED', kind: 'hint',
+    spec_version: '1.0', id: 'TOOL_OUTPUT_SPILL_CAPPED', kind: 'hint',
     severity: 'info', what: 'Output was capped.', fix: 'Narrow the request.',
   });
   assert.equal(hint.id, 'TOOL_OUTPUT_SPILL_CAPPED');
   assert.equal(hint.kind, 'hint');
   // [OAR-HINT-1] no evaluation fields.
-  assert.throws(() => loadHint({ spec_version: '1.1', id: 'H', kind: 'hint', when: 'tool', what: 'x' }), /\[OAR-HINT-1\]/);
-  assert.throws(() => loadHint({ spec_version: '1.1', id: 'H', kind: 'hint', effect: 'block', what: 'x' }), /\[OAR-HINT-1\]/);
+  assert.throws(() => loadHint({ spec_version: '1.0', id: 'H', kind: 'hint', when: 'tool', what: 'x' }), /\[OAR-HINT-1\]/);
+  assert.throws(() => loadHint({ spec_version: '1.0', id: 'H', kind: 'hint', effect: 'block', what: 'x' }), /\[OAR-HINT-1\]/);
   // [OAR-HINT-2] at least one copy member.
-  assert.throws(() => loadHint({ spec_version: '1.1', id: 'H', kind: 'hint' }), /\[OAR-HINT-2\]/);
+  assert.throws(() => loadHint({ spec_version: '1.0', id: 'H', kind: 'hint' }), /\[OAR-HINT-2\]/);
   // [OAR-HINT-3] copy is static.
-  assert.throws(() => loadHint({ spec_version: '1.1', id: 'H', kind: 'hint', what: 'has {{ x }}' }), /\[OAR-HINT-3\]/);
-  // Hints are 1.1-native.
-  assert.throws(() => loadHint({ spec_version: '1.0', id: 'H', kind: 'hint', what: 'x' }), /1\.1/);
+  assert.throws(() => loadHint({ spec_version: '1.0', id: 'H', kind: 'hint', what: 'has {{ x }}' }), /\[OAR-HINT-3\]/);
+  // An unsupported spec_version is rejected, not coerced.
+  assert.throws(() => loadHint({ spec_version: '1.1', id: 'H', kind: 'hint', what: 'x' }), /unsupported spec_version/);
 });
 
 test('host facts extend the environment under [OAR-FACT-19]', () => {

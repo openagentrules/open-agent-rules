@@ -24,7 +24,7 @@ export class RuleLoadError extends Error {
   }
 }
 
-export const SUPPORTED_SPEC_VERSIONS = ['1.0', '1.1'] as const;
+export const SUPPORTED_SPEC_VERSIONS = ['1.0'] as const;
 
 export type Kind = 'schema' | 'policy' | 'invariant' | 'detector';
 export type Effect = 'block' | 'warn' | 'nudge' | 'allow' | 'transform';
@@ -316,9 +316,9 @@ export function loadHint(doc: unknown): Hint {
   if (!/^[0-9]+\.[0-9]+$/.test(specVersion)) {
     throw new RuleLoadError(`spec_version ${JSON.stringify(specVersion)} is not <major>.<minor>`);
   }
-  if (specVersion !== '1.1') {
+  if (!(SUPPORTED_SPEC_VERSIONS as readonly string[]).includes(specVersion)) {
     throw new RuleLoadError(
-      `hint carries spec_version ${JSON.stringify(specVersion)} — hints are defined at 1.1`,
+      `unsupported spec_version ${JSON.stringify(specVersion)} (want one of ${SUPPORTED_SPEC_VERSIONS.join(', ')})`,
     );
   }
 
