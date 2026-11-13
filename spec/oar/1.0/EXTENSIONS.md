@@ -1,10 +1,10 @@
 # Extension registry
 
 Open Agent Rules reserves fields whose names match `^x-[a-z0-9]+(-[a-z0-9]+)*$` for
-implementations. An engine ignores an `x-` field it does not recognise (`[OAR-DOC-26]`), and an
-`x-` field never affects selection, evaluation, ordering, precedence, or the returned decision.
-Every other undefined field is rejected at load, naming the field (`[OAR-DOC-27]`), so `x-` is
-the only way to carry something this specification does not define.
+implementations. An engine ignores an `x-` field it does not recognise, and an `x-` field
+never becomes normative without a specification change ([OAR-DOC-19]). Every other undefined
+field is rejected at load, naming the field ([OAR-DOC-19]), so `x-` is the only way to carry
+something this specification does not define.
 
 This file records the extensions implementations have published.
 
@@ -53,13 +53,14 @@ The registry exists to make collisions visible, not to prevent them by authority
 An `x-` field is data an implementation carries through. It is not a way to add behaviour to
 the format.
 
-- It **must not** affect any decision (`[OAR-DOC-26]`). An engine that branches on its own
-  `x-` field has forked the format and given the fork a prefix. A rule using that engine's
-  extension produces one decision there and a different one everywhere else, which is the
-  failure this whole specification exists to prevent.
-- It **must not** become normative without a specification change. If an extension turns out to
-  be something every engine needs, the path is a proposal against the specification —
-  see [`GOVERNANCE.md`](../GOVERNANCE.md) — not wider adoption of the prefix.
+- It **must not** affect any decision. An engine that branches on its own `x-` field has
+  forked the format and given the fork a prefix. A rule using that engine's extension produces
+  one decision there and a different one everywhere else, which is the failure this whole
+  specification exists to prevent.
+- It **must not** become normative without a specification change ([OAR-DOC-19]). If an
+  extension turns out to be something every engine needs, the path is a proposal against the
+  specification — see [`GOVERNANCE.md`](../GOVERNANCE.md) — not wider adoption of the prefix.
 - It is **not** the mechanism for host-specific observations. Those are facts, and they live
-  under a namespace the host owns, written `<host>.<fact>` (`[OAR-FACT-18]`). A rule that
-  composes one is legal and is not portable, and a portability report will say so.
+  under a namespace the host owns, written `<host>.<fact>` ([OAR-FACT-15]). A rule that
+  composes one is legal and is not portable, and a portability report will say so
+  ([OAR-PROF-7]).

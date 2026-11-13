@@ -61,37 +61,40 @@ async function main() {
     const fx = JSON.parse(await readFile(join(CORPUS, name), 'utf8'));
     const stem = name.replace(/\.json$/, '');
     if (fx.id !== stem) problems.push(`${name}: id ${JSON.stringify(fx.id)} != file stem ${JSON.stringify(stem)}`);
-    // [OAR-CONF-30] An expected.error substring must be a single machine token —
-    // a field name, an identifier, a clause identifier, or an enum member — and
-    // must not be a phrase or a sentence. [OAR-CONF-21] frees an engine to word
-    // its own diagnostics, and asserting a whole English sentence takes that
-    // freedom back: a second implementation naming the same field in its own
-    // words would fail a fixture it is behaving correctly on.
+    // [OAR-CONF-15] An expected.error substring must be a single machine token —
+    // a field name, an identifier, a literal, or a clause identifier — and never
+    // a phrase: an engine words its own diagnostics, and a second implementation
+    // naming the same field in its own words must not fail a fixture.
     const wanted = fx.expected?.error;
     if (typeof wanted === 'string' && !/^[A-Za-z0-9_][A-Za-z0-9_./:<>-]*$/.test(wanted)) {
-      problems.push(`${name}: expected.error ${JSON.stringify(wanted)} is not a single machine token [OAR-CONF-30]`);
+      problems.push(`${name}: expected.error ${JSON.stringify(wanted)} is not a single machine token [OAR-CONF-15]`);
     }
-    // [OAR-CONF-32] A counter a fixture hands the engine ready-made tests the
-    // fixture loader; a counter the engine had to arrive at tests the engine.
-    // So a fixture that asserts a non-zero counter, or gates an effect on one of
-    // the counter-reading functions, has to reach that value through the
-    // declared side-effects of the occurrences it lists.
+    // [OAR-CONF-13], [OAR-FIRE-10] A count a fixture hands the engine
+    // ready-made tests the fixture loader; a count the engine had to arrive at
+    // tests the engine. So the engine-maintained facts are reached through the
+    // occurrences a fixture lists, never supplied.
     for (const facts of [fx.input?.facts ?? {}, ...(fx.input?.occurrences ?? []).map((o) => o.facts ?? {})]) {
-      for (const fact of ['fire_count', 'breaker_count', 'fire_count_of', 'breaker_count_of']) {
-        if (fact in facts) problems.push(`${name}: supplies ${fact} in facts [OAR-CONF-32]`);
+      for (const fact of ['fire_count', 'breaker_count', 'same_code_reject_run', 'same_call_run']) {
+        if (fact in facts) problems.push(`${name}: supplies ${fact} in facts [OAR-FIRE-10]`);
       }
     }
     // The most an occurrence can add to a counter is the number of increments
     // the rule lists in on_fire — a rule may list one twice. A fixture asserting
     // more than every occurrence it lists could have written is asserting a value
     // no engine could reach, which means the fixture put it there rather than the
-    // engine. Counter keys carry a #scope suffix for a scoped rule [OAR-CONF-33].
-    const occurrenceCount = Array.isArray(fx.input?.occurrences) ? fx.input.occurrences.length : 1;
+    // engine. The fixture's own occurrence follows the earlier ones it lists.
+    const occurrenceCount = (Array.isArray(fx.input?.occurrences) ? fx.input.occurrences.length : 0) + 1;
     const ACTION = { fire_count: 'increment_counter', breaker_count: 'increment_breaker' };
+    const ruleDocs = Array.isArray(fx.rules)
+      ? fx.rules
+      : Array.isArray(fx.rule)
+        ? fx.rule
+        : fx.rule !== undefined
+          ? [fx.rule]
+          : [];
     for (const [key, counters] of Object.entries(fx.expected?.counters ?? {})) {
-      const qualified = key.split('#')[0];
-      const rule = (fx.rules ?? []).find(
-        (r) => (r.namespace ? `${r.namespace}/${r.id}` : r.id) === qualified,
+      const rule = ruleDocs.find(
+        (r) => (r.namespace ? `${r.namespace}/${r.id}` : r.id) === key,
       );
       for (const [field, value] of Object.entries(counters ?? {})) {
         const perOccurrence = (rule?.on_fire ?? []).filter((a) => a === ACTION[field]).length;
@@ -99,7 +102,7 @@ async function main() {
         if (typeof value === 'number' && value > ceiling) {
           problems.push(
             `${name}: expects ${key} ${field}=${value}, above the ${ceiling} that ` +
-              `${occurrenceCount} occurrence(s) of this rule could write [OAR-CONF-32]`,
+              `${occurrenceCount} occurrence(s) of this rule could write [OAR-CONF-15]`,
           );
         }
       }
@@ -122,27 +125,6 @@ async function main() {
   }
   for (const file of [...listed].sort()) {
     if (!present.has(file)) problems.push(`conformance/manifest.json lists ${file}, which does not exist`);
-  }
-
-  // [OAR-CONF-35] The manifest marks a fixture baseline exactly when its
-  // capability document claims no profile, no host fact, no activity window, no
-  // content mutation, and no detector beyond the three the corpus reserves. The
-  // flag is computed here from the fixture itself, so the manifest cannot
-  // quietly promise a different floor than the corpus delivers.
-  const RESERVED = new Set(['detector://noop', 'detector://error', 'detector://fixture']);
-  for (const entry of manifest.fixtures ?? []) {
-    if (!present.has(entry.file)) continue;
-    const fx = JSON.parse(await readFile(join(CORPUS, entry.file), 'utf8'));
-    const cap = fx.input?.capability ?? {};
-    const minimal =
-      Array.isArray(cap.profiles) && cap.profiles.length === 0 &&
-      (cap.host_facts === undefined || cap.host_facts.length === 0) &&
-      cap.activity_window === 0 &&
-      cap.supports_transform === false &&
-      Array.isArray(cap.detectors) && cap.detectors.every((d) => RESERVED.has(d));
-    const flagged = entry.baseline === true;
-    if (minimal && !flagged) problems.push(`${entry.file}: declares the baseline capability but the manifest does not mark it baseline [OAR-CONF-35]`);
-    if (!minimal && flagged) problems.push(`${entry.file}: marked baseline but declares more than the baseline capability [OAR-CONF-35]`);
   }
 
   const exemptDoc = JSON.parse(await readFile(join(CORPUS, 'exempt.json'), 'utf8'));

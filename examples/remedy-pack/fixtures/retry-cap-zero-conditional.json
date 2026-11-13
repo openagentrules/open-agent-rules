@@ -1,0 +1,55 @@
+{
+  "id": "retry-cap-zero-conditional",
+  "title": "Copy reads correctly when a bound bool is at its zero value",
+  "covers": [
+    "OAR-COPY-3",
+    "OAR-COPY-7",
+    "OAR-FACT-24",
+    "OAR-FACT-25"
+  ],
+  "rule": {
+    "spec_version": "1.0",
+    "id": "RETRY_CAP_REFUSED",
+    "namespace": "example.remedy",
+    "kind": "policy",
+    "on": "tool.pre_invoke",
+    "selector": {},
+    "requires_facts": [
+      "example.attempts",
+      "example.breaker_open",
+      "example.redaction_count"
+    ],
+    "when": "example.attempts >= 3",
+    "effect": "block",
+    "profile": "host",
+    "title": "Retry cap refused",
+    "what": "The call has been attempted {{ example.attempts }} times.",
+    "cause": "The host's retry accounting shows the same call replayed without a change of approach.",
+    "why": "Repeating a refused call spends the session's budget on the same refusal.",
+    "fix": "{% if example.breaker_open %}The host's circuit breaker is open; wait for it to reset before calling again.{% else %}Change the approach — inspect the environment or ask for the specific slice you need — before calling again.{% endif %}",
+    "instead": "The host has applied {{ example.redaction_count }} redactions to earlier output; ask for the unredacted slice by name if you need it."
+  },
+  "input": {
+    "anchor": "tool.pre_invoke",
+    "facts": {
+      "example.attempts": 3,
+      "example.redaction_count": 2
+    },
+    "host_facts": {
+      "example.attempts": "int",
+      "example.breaker_open": "bool",
+      "example.redaction_count": "int"
+    }
+  },
+  "expected": {
+    "decision": "block",
+    "code": "RETRY_CAP_REFUSED",
+    "copy": {
+      "what": "The call has been attempted 3 times.",
+      "cause": "The host's retry accounting shows the same call replayed without a change of approach.",
+      "why": "Repeating a refused call spends the session's budget on the same refusal.",
+      "fix": "Change the approach — inspect the environment or ask for the specific slice you need — before calling again.",
+      "instead": "The host has applied 2 redactions to earlier output; ask for the unredacted slice by name if you need it."
+    }
+  }
+}

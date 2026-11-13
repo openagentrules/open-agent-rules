@@ -1,0 +1,24 @@
+# The rule half of the remedy pattern: a guard-pipeline rule whose copy binds
+# host-tier facts. The host publishes its own observations under its namespace
+# ([OAR-FACT-15]); the rule names them in requires_facts ([OAR-COPY-5]) and
+# interpolates them into copy ([OAR-COPY-2], [OAR-COPY-4]). The host catalog
+# this pack assumes is documented in host-facts.yaml.
+spec_version: "1.0"
+id: RETRY_CAP_REFUSED
+namespace: example.remedy
+kind: policy
+on: tool.pre_invoke
+selector: {}
+requires_facts:
+  - example.attempts
+  - example.breaker_open
+  - example.redaction_count
+when: 'example.attempts >= 3'
+effect: block
+profile: host
+title: Retry cap refused
+what: "The call has been attempted {{ example.attempts }} times."
+cause: "The host's retry accounting shows the same call replayed without a change of approach."
+why: "Repeating a refused call spends the session's budget on the same refusal."
+fix: "{% if example.breaker_open %}The host's circuit breaker is open; wait for it to reset before calling again.{% else %}Change the approach — inspect the environment or ask for the specific slice you need — before calling again.{% endif %}"
+instead: "The host has applied {{ example.redaction_count }} redactions to earlier output; ask for the unredacted slice by name if you need it."

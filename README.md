@@ -10,7 +10,7 @@ capabilities the document declares it needs.
 - **Schemas** — <https://openagentrules.org/spec/1.0/schemas.html>
 - **Conformance corpus** — <https://openagentrules.org/spec/1.0/conformance.html>
 - **A worked rule pack** — <https://openagentrules.org/examples/portable-pack.html>
-- **Converting a moderation policy** — <https://openagentrules.org/examples/moderation-pack.html>
+- **The hint channel** — <https://openagentrules.org/examples/remedy-pack.html>
 
 **This repository is the standard.** The specification is hand-authored here, in
 [`spec/oar/`](spec/oar/), and the published site is built from it. It is not a mirror of any
@@ -23,9 +23,11 @@ is at the URLs above.
 ## How to read it
 
 Start with [`spec/oar/1.0/open-agent-rules.md`](spec/oar/1.0/open-agent-rules.md). It is one
-file. Sections 1 to 3 are the document model and how a rule is selected; sections 4 to 7 are
-what an engine does with it; section 10.1 is the runner algorithm, numbered so a fixture can
-cite each step; Appendix A is the condition language, with a grammar.
+file. Sections 1 to 3 are the document model and how a rule is selected; sections 4 to 8 are
+what an engine does with it and what it may assume; section 9 is the hint channel, for
+presentation copy a host raises outside the guard pipeline; section 10.1 is the runner
+algorithm, numbered so a fixture can cite each step; Appendix C is the condition language,
+with a grammar.
 
 Every requirement carries a stable identifier like `[OAR-EVAL-4]`. Quote it in an issue.
 
@@ -33,32 +35,30 @@ Then:
 
 - [`spec/oar/RATIONALE.md`](spec/oar/RATIONALE.md) — why the format exists, why not Rego,
   Cedar, or a callback API, and the reasoning behind its main design choices.
-- [`examples/portable-pack/`](examples/portable-pack/) — ten rules that exercise most of the
-  format, plus the capability document they assume and an operator configuration.
-- [`examples/moderation-pack/`](examples/moderation-pack/) — a hosted moderation policy, of the
-  kind the large model platforms ship, rewritten as rules; what maps directly and what does not.
+- [`examples/portable-pack/`](examples/portable-pack/) — rules that exercise most of the
+  format, portable by construction.
+- [`examples/remedy-pack/`](examples/remedy-pack/) — the hint-channel pattern: rules whose
+  copy binds a host fact, and hint documents a host raises by code.
 - [`spec/oar/1.0/vocabulary.yaml`](spec/oar/1.0/vocabulary.yaml) — the vocabulary in
   machine-readable form, if you would rather consume it than read it.
 
 ## Run the corpus against your own engine
 
 The corpus is language-neutral JSON: one fixture per file, each declaring the rules, the
-capability document of the host it assumes, the input, and the decision a conforming engine
-must produce.
+input, and the decision a conforming engine must produce.
 
 ```bash
 curl -O https://openagentrules.org/spec/1.0/conformance/manifest.json
 ```
 
-Load the manifest, fetch and run each fixture it names through your evaluator against that
-fixture's own `input.capability`, and compare against `expected`. Report the fixtures you
-skipped and why — a skipped fixture is not a passed fixture (`[OAR-CONF-24]`), and a fixture
-the manifest marks `baseline` may not be skipped at all (`[OAR-CONF-35]`). Every fixture lists
-the clauses it exercises, so a failure tells you which sentence you and the specification
-disagree about.
+Load the manifest, fetch and run each fixture it names through your evaluator, and compare
+against `expected`. Report the fixtures you skipped and why — a skipped fixture is not a
+passed fixture, and only a fixture whose rules need a standard profile you do not claim may be
+skipped. Every fixture lists the clauses it exercises, so a failure tells you which
+sentence you and the specification disagree about.
 
-A reference runner ships here and needs no account and no monorepo. Point it at a local
-checkout, or at the published manifest URL and it fetches the fixtures itself:
+A reference runner ships here and needs no account and no monorepo. It reads the corpus from a
+local checkout:
 
 ```bash
 npm ci --prefix packages/oar-ref
@@ -126,7 +126,6 @@ task check
 | `task spec:clauses:check` | Clause identifiers are unique, dense within an area, and append-only |
 | `task schema:check` | Every schema parses, carries its published `$id`, and resolves every `$ref` |
 | `task spec:coverage:check` | Every MUST clause is covered by a fixture or a written exemption |
-| `task spec:capability:check` | Every fixture declares only the capabilities it exercises |
 | `task site:build` | Rebuild `site/` from `spec/oar/` and `static/_headers` |
 | `task site:check` | Build `site/` and verify its JSON, links, sitemap, and `_headers` |
 | `task conformance` | The reference implementation passes the published corpus |
