@@ -83,9 +83,40 @@ export async function loadFixtures(dir: string): Promise<Fixture[]> {
   return out;
 }
 
+// The closed fixture vocabulary ([OAR-CONF-13], [OAR-CONF-15]).
+const FIXTURE_KEYS = new Set(['id', 'title', 'covers', 'rule', 'hints', 'input', 'expected']);
+const INPUT_KEYS = new Set(['anchor', 'facts', 'recent_tools', 'session_id', 'host_facts', 'profile']);
+const EXPECTED_KEYS = new Set(['decision', 'code', 'on_fire', 'applied', 'counters', 'copy', 'error']);
+
+/** The first member outside the fixture vocabulary, or null when the shape is closed. */
+export function fixtureShapeError(fx: Fixture): string | null {
+  const record = fx as unknown as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (!FIXTURE_KEYS.has(key)) return `fixture carries undefined member ${JSON.stringify(key)}`;
+  }
+  for (const key of ['input', 'expected']) {
+    if (record[key] === undefined) return `fixture is missing ${JSON.stringify(key)}`;
+  }
+  if (record['rule'] === undefined && record['hints'] === undefined) {
+    return 'fixture carries neither "rule" nor "hints"';
+  }
+  for (const key of Object.keys(fx.input ?? {})) {
+    if (!INPUT_KEYS.has(key)) return `input carries undefined member ${JSON.stringify(key)}`;
+  }
+  for (const key of Object.keys(fx.expected ?? {})) {
+    if (!EXPECTED_KEYS.has(key)) return `expected carries undefined key ${JSON.stringify(key)}`;
+  }
+  return null;
+}
+
 /** Replay one fixture and report what, if anything, did not match. */
 export function runFixture(fx: Fixture): FixtureResult {
   const base = { id: fx.id, title: fx.title, covers: fx.covers };
+  // [OAR-CONF-15] An undefined expected key is refused, never passed silently.
+  const shapeError = fixtureShapeError(fx);
+  if (shapeError !== null) {
+    return { ...base, pass: false, detail: shapeError };
+  }
   let env: Environment = referenceEnvironment();
   // A fixture whose outcome turns on which core anchors a host supports carries
   // its own profile map, so every implementation is asked the same question.

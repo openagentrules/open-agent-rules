@@ -568,10 +568,10 @@ identified so a conformance fixture can cite it.
 
 ### 10.2 Fixture shape
 
-- **[OAR-CONF-13]** A conformance fixture is a JSON object with `rule`, `input`, and
-  `expected`, and MAY carry `hints` — a list of hint documents (`[OAR-HINT-1]`) the engine
-  loads and never evaluates. `rule` is a rule document or a list of rule documents. `input`
-  carries the `anchor` at which the occurrence happens and a `facts` map, and MAY carry
+- **[OAR-CONF-13]** A conformance fixture is a JSON object with `input` and `expected` and at
+  least one of `rule` and `hints`. `rule` is a rule document or a list of rule documents;
+  `hints` is a list of hint documents (`[OAR-HINT-1]`) the engine loads and never evaluates.
+  `input` carries the `anchor` at which the occurrence happens and a `facts` map, and MAY carry
   `recent_tools` (the recent activity window `flow` matches against), `session_id` (the
   scope counters are keyed by), `host_facts` (a map naming each `host`-tier fact the
   fixture supplies and its declared type, `[OAR-FACT-25]`), and `profile` (an anchor
@@ -583,15 +583,17 @@ identified so a conformance fixture can cite it.
   different question, which the corpus promises never to do.
 - **[OAR-CONF-14]** A fixture MUST carry an `id` equal to its file name stem and a non-empty
   `covers` list of clause identifiers defined by this specification.
-- **[OAR-CONF-15]** `expected` MAY carry any of six keys, and a fixture asserts only the ones
+- **[OAR-CONF-15]** `expected` MAY carry any of seven keys, and a fixture asserts only the ones
   it is about. `decision` is the effect the occurrence resolves to, or `none` when nothing
   actionable is produced. `code` is the identifier the decision carries. `on_fire` lists the
   side-effects the winning rule declared. `applied` is the ordered applied-rules trace, each
   entry written `<rule id>:<outcome>` with the outcome one of `fired`, `passed`, `errored`,
   `monitor`. `counters` maps a rule identifier to the counter values expected after the
-  occurrence. `error` asserts a load-time rejection and matches when the engine's error
-  contains the given text; an engine MUST NOT be required to match error wording beyond that
-  substring. An engine MUST reject a fixture carrying any other `expected` key rather than
+  occurrence. `copy` maps copy members to the rendered text the decision carries
+  (`[OAR-COPY-7]`) and asserts only the members it names; `null` asserts that the decision
+  carries no copy (`[OAR-COPY-10]`). `error` asserts a load-time rejection and matches when
+  the engine's error contains the given text; an engine MUST NOT be required to match error
+  wording beyond that substring. An engine MUST reject a fixture carrying any other `expected` key rather than
   passing it silently.
 - **[OAR-CONF-16]** An implementation claiming conformance MUST pass every fixture in the
   published corpus whose clauses fall within the profiles it declares, and MUST report which

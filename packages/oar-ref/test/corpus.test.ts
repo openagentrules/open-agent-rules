@@ -16,7 +16,7 @@ const Ajv2020 = require('ajv/dist/2020') as new (opts: object) => {
   errorsText(errors: unknown): string;
 };
 
-import { loadFixtures, loadManifest, runFixture } from '../src/runner.js';
+import { fixtureShapeError, loadFixtures, loadManifest, runFixture, type Fixture } from '../src/runner.js';
 import { parse, UnsupportedCelConstruct } from '../src/parse.js';
 import { loadHint, loadRule, RuleLoadError } from '../src/load.js';
 import { referenceAnchorProfile, referenceEnvironment, withHostFacts } from '../src/env.js';
@@ -79,6 +79,29 @@ test('every fixture rule validates against the published schema', async () => {
       assert.ok(validate(doc), `${fx.id} hint: ${ajv.errorsText(validate.errors)}`);
     }
   }
+});
+
+test('every fixture uses only the members the fixture shape defines', async () => {
+  for (const fx of await loadFixtures(CORPUS)) {
+    assert.equal(fixtureShapeError(fx), null, fx.id);
+  }
+});
+
+test('a fixture asserting an undefined expected key fails rather than passing', () => {
+  const fx = {
+    id: 'undefined-expected-key',
+    title: 'An undefined expected key',
+    covers: ['OAR-CONF-15'],
+    rule: {
+      spec_version: '1.0', id: 'R', kind: 'policy', on: 'tool.pre_invoke', selector: {},
+      effect: 'block', when: 'tool == "read"',
+    },
+    input: { anchor: 'tool.pre_invoke', facts: { tool: 'read' } },
+    expected: { decision: 'block', verdict: 'deny' },
+  } as unknown as Fixture;
+  const result = runFixture(fx);
+  assert.equal(result.pass, false);
+  assert.match(result.detail ?? '', /verdict/);
 });
 
 test('constructs outside the declared subset are refused by name', () => {
