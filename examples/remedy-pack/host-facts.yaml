@@ -4,6 +4,6 @@
 # the host owns) and the fixture input's host_facts member ([OAR-CONF-13]).
 # A host that does not publish these facts simply does not run the rules that
 # name them — see README.md for the fallback chain.
-paintedwolf.attempts: int
-paintedwolf.breaker_open: bool
-paintedwolf.redaction_count: int
+example.attempts: int
+example.breaker_open: bool
+example.redaction_count: int

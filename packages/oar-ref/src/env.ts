@@ -31,13 +31,17 @@ export interface FunctionDecl {
 export const CORE_FACTS: Readonly<Record<string, FactDecl>> = {
   tool: { type: 'string', tier: 'core' },
   tool_args: { type: 'map<string, dyn>', tier: 'core' },
-  tool_args_fingerprint: { type: 'string', tier: 'core' },
-  arg_validation_errors: { type: 'list<string>', tier: 'core' },
-  not_found: { type: 'bool', tier: 'core' },
-  is_directory: { type: 'bool', tier: 'core' },
-  breaker_count: { type: 'int', tier: 'core' },
   fire_count: { type: 'int', tier: 'core' },
+  breaker_count: { type: 'int', tier: 'core' },
   same_code_reject_run: { type: 'int', tier: 'core' },
+  same_call_run: { type: 'int', tier: 'core' },
+};
+
+/** Standard profile: filesystem. */
+export const FILESYSTEM_FACTS: Readonly<Record<string, FactDecl>> = {
+  is_directory: { type: 'bool', tier: 'standard', profile: 'filesystem' },
+  not_found: { type: 'bool', tier: 'standard', profile: 'filesystem' },
+  path_outside_scope: { type: 'bool', tier: 'standard', profile: 'filesystem' },
 };
 
 /** Standard profile: content-safety. Provided whole or not at all. */
@@ -64,7 +68,8 @@ export const MCP_FACTS: Readonly<Record<string, FactDecl>> = {
 };
 
 export const CORE_FUNCTIONS: Readonly<Record<string, FunctionDecl>> = {
-  path_outside_scope: { arg: 'string', returns: 'bool', tier: 'core' },
+  fire_count_of: { arg: 'string', returns: 'int', tier: 'core' },
+  breaker_count_of: { arg: 'string', returns: 'int', tier: 'core' },
 };
 
 export const MCP_FUNCTIONS: Readonly<Record<string, FunctionDecl>> = {
@@ -85,9 +90,9 @@ export interface Environment {
  */
 export function referenceEnvironment(): Environment {
   return {
-    facts: { ...CORE_FACTS, ...CONTENT_SAFETY_FACTS, ...MCP_FACTS },
+    facts: { ...CORE_FACTS, ...FILESYSTEM_FACTS, ...CONTENT_SAFETY_FACTS, ...MCP_FACTS },
     functions: { ...CORE_FUNCTIONS, ...MCP_FUNCTIONS },
-    profiles: ['content-safety', 'mcp'],
+    profiles: ['filesystem', 'content-safety', 'mcp'],
   };
 }
 
@@ -168,7 +173,28 @@ export interface AnchorProfile {
  * core anchor maps to itself and none is unsupported.
  */
 export function referenceAnchorProfile(): AnchorProfile {
+  return validateAnchorProfile(selfMappedProfile());
+}
+
+function selfMappedProfile(): AnchorProfile {
   const core: Record<string, string> = {};
   for (const id of CORE_ANCHORS) core[id] = id;
   return { version: '1.0', core, unsupported: [] };
+}
+
+/**
+ * [OAR-PROF-2] Every core anchor appears exactly once, either mapped to a local
+ * anchor or declared unsupported; nothing else appears.
+ */
+export function validateAnchorProfile(profile: AnchorProfile): AnchorProfile {
+  const core = Object.keys(profile.core);
+  const known = new Set<string>(CORE_ANCHORS);
+  for (const id of [...core, ...profile.unsupported]) {
+    if (!known.has(id)) throw new Error(`anchor profile names ${id}, which is not a core anchor [OAR-PROF-2]`);
+  }
+  for (const id of CORE_ANCHORS) {
+    const n = (core.includes(id) ? 1 : 0) + profile.unsupported.filter((u) => u === id).length;
+    if (n !== 1) throw new Error(`anchor profile declares core anchor ${id} ${n} times, want once [OAR-PROF-2]`);
+  }
+  return profile;
 }

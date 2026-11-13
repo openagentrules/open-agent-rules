@@ -11,7 +11,7 @@
       "id": "TOOL_OUTPUT_SPILL_CAPPED",
       "namespace": "example.remedy",
       "kind": "hint",
-      "what": "The tool's output was capped at {{ paintedwolf.attempts }} bytes."
+      "what": "The tool's output was capped at {{ example.attempts }} bytes."
     }
   ],
   "input": {

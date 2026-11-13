@@ -52,10 +52,10 @@ namespace: acme.security        # publisher scope; identity is (namespace, id)
 kind: policy                    # fixes evaluation order, nothing else
 on: tool.pre_invoke             # a core anchor: before the tool runs
 selector:
-  tool: [read, grep]            # the clause names the `tool` fact; clauses are AND
-requires_facts:                 # what this rule needs the host to provide
-  - workspace_root
-when: 'path_outside_scope(workspace_root, tool_path)'   # composition of observations
+  tools: [read, grep]           # matches when the core fact `tool` is one of these
+requires_facts:                 # every non-core fact the rule reads
+  - path_outside_scope
+when: 'path_outside_scope'      # an observation; the rule decides what it means
 effect: block                   # what the engine does when the condition holds
 on_error: fail_closed           # if this cannot be evaluated, block
 what: "The call reads outside the declared scope."
@@ -158,14 +158,14 @@ operator sees a passing conformance run.
 1.0 answers with tiers instead of a catalogue
 ([`[OAR-FACT-11]`](https://openagentrules.org/spec/1.0/#5-1-fact-tiers)). A `core` fact is one
 every conforming engine provides ([`[OAR-FACT-12]`]). A `standard` fact belongs to a named
-profile — content safety, MCP — that an engine provides whole or not at all
+profile — filesystem, content safety, MCP — that an engine provides whole or not at all
 ([`[OAR-FACT-13]`]). A `host` fact is the engine's own observation, published under a
 namespace it owns so that two engines cannot collide on a bare name
 ([`[OAR-FACT-15]`]). Nothing is stubbed, because nothing has to be.
 
 The rule's side of the contract is `requires_facts`
-([`[OAR-DOC-22]`]): the rule names the facts it needs, and an engine that does not provide one
-of them rejects the rule at load
+([`[OAR-DOC-22]`]): the rule names every fact outside the core that it reads, and an engine
+that does not provide one of them rejects the rule at load
 ([`[OAR-CONF-4]`](https://openagentrules.org/spec/1.0/#10-conformance)) rather than failing
 condition compilation or evaluating a default. A rule is *portable* — the word the format
 commits to — when its anchor is a core anchor and its facts come from the core and standard
@@ -187,26 +187,28 @@ for a fact outside the core tier is rejected. That is one
 more line per rule, and it is the line that makes portability a property of the document rather
 than a claim about it.
 
-## Selector clauses are fact names
+## A closed selector
 
-A fixed selector vocabulary such as `principal`, `ledger`, `surface`, `phase`, and `workflow`
-would give those clauses no defined relationship to a fact, no declared type, and no sound
-behavior on an engine that does not model them. Silently matching such a clause would turn a
-scope into a no-op.
+A selector is for cheap, indexable narrowing, and 1.0 gives it exactly one clause: `tools`,
+which matches when the core fact `tool` is one of the names it lists
+([`[OAR-SEL-7]`](https://openagentrules.org/spec/1.0/#3-anchors-and-selection)). Everything
+else a rule wants to narrow by is a condition over declared facts, where it has a type and a
+tier.
 
-Read that again with `principal` in mind. `principal` is the multi-tenant scoping clause — the
-one an operator writes to say *this rule applies to that customer's traffic*. On an engine with
-no principal model, a rule scoped to one tenant applied to all of them, and a rule scoped to an
-administrative principal applied to everybody. Failing open on a scoping clause is not a
-cosmetic gap in a specification. It is a security bug that reads, in the configuration file,
-exactly like a working scope.
+The alternative was a vocabulary of host-shaped clauses — `principal`, `ledger`, `surface`,
+`phase`, `workflow` — with no defined relationship to a fact, no declared type, and no sound
+behaviour on an engine that does not model them. Silently matching such a clause turns a scope
+into a no-op. Read that with `principal` in mind: it is the multi-tenant scoping clause, the one
+an operator writes to say *this rule applies to that customer's traffic*. On an engine with no
+principal model, a rule scoped to one tenant would apply to all of them. Failing open on a
+scoping clause is a security bug that reads, in the configuration file, exactly like a working
+scope.
 
-A selector clause names a declared fact, and an engine rejects at load a clause naming a
-fact it does not declare
-([`[OAR-SEL-3]`](https://openagentrules.org/spec/1.0/#3-anchors-and-selection)). There is no
-second vocabulary to keep in sync, no clause without a type, and no way to write a scoping
-clause an engine will quietly ignore. The failure moved from runtime silence to a load error
-that names the clause, which is the only kind of failure an operator can act on.
+So the vocabulary is closed and published as a schema, and an engine rejects at load a clause
+it does not define. The one clause there is never matches where it has nothing to match against:
+`tools` does not select an occurrence at which no tool is invoked
+([`[OAR-SEL-6]`]). A host-specific dimension is a host-tier fact, and a rule that scopes on it
+says so in `requires_facts`, where the scope is visible and computably non-portable.
 
 ## One decision per occurrence
 
@@ -214,9 +216,9 @@ An occurrence gets one decision. Several rules may fire at it; the format says e
 they combine, and it does so with three sentences rather than a negotiation mechanism.
 
 The order is fixed: ascending by `kind` in the sequence `schema`, `policy`, `invariant`,
-`detector`, then ascending lexicographically by `id`
-([`[OAR-EVAL-1]`](https://openagentrules.org/spec/1.0/#4-evaluation)). The first rule that
-fires with `block` or `transform` short-circuits the occurrence
+`detector`, then by `id`, then by `namespace`
+([`[OAR-EVAL-1]`](https://openagentrules.org/spec/1.0/#4-evaluation)). The first enforced rule
+that fires with `block` short-circuits the occurrence
 ([`[OAR-EVAL-3]`]). What survives short-circuit resolves by precedence: `block`, then `nudge`,
 then `warn`, then the occurrence is allowed ([`[OAR-EVAL-4]`]).
 
@@ -358,7 +360,8 @@ nothing else gets that grace.
 
 `when` is written in a small language with a published EBNF grammar, defined by what it
 excludes as much as by what it includes: no macros, no comprehensions, no time, no random
-source, no field selection, no regular expressions.
+source, no null, no regular expressions, and no field selection beyond reading one member of a
+map fact.
 
 Kubernetes did this work for admission control. ValidatingAdmissionPolicy does not say "CEL"
 and stop there — it pins an explicit set of CEL libraries, and adds a cost budget so that an
@@ -388,13 +391,14 @@ Two commands:
 
 ```bash
 curl -O https://openagentrules.org/spec/1.0/oar.schema.json
-npx @openagentrules/oar-ref https://openagentrules.org/spec/1.0/conformance/manifest.json
+node packages/oar-ref/bin/oar-conformance.mjs spec/oar/1.0/conformance
 ```
 
-Given the manifest URL, the reference runner fetches every fixture the manifest names and
-runs them, reporting pass, fail, and skip separately — a skipped fixture is not a passed
-fixture, and a baseline fixture may not be skipped at all. Point it at a local directory
-instead and it fetches nothing.
+The first fetches the document schema. The second replays the corpus from a checkout of this
+repository against the reference runner, which reads local files only and reports each fixture
+as passed or failed. Your own runner reports the fixtures it skipped and why: a skipped fixture
+is not a passed one, and only a fixture whose rules need a standard profile you do not claim
+may be skipped ([`[OAR-CONF-16]`]).
 
 Read the numbered runner algorithm in
 [section 10.1](https://openagentrules.org/spec/1.0/#10-1-the-runner-algorithm) of the

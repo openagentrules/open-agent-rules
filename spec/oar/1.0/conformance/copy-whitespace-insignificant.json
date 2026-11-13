@@ -11,7 +11,10 @@
     "selector": {},
     "effect": "block",
     "when": "tool == \"read\"",
-    "what": "tool={{tool}} not_found={{ not_found  }}."
+    "what": "tool={{tool}} not_found={{ not_found  }}.",
+    "requires_facts": [
+      "not_found"
+    ]
   },
   "input": {
     "anchor": "tool.pre_invoke",

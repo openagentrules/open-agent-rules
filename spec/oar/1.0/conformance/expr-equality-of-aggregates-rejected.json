@@ -11,7 +11,7 @@
     "on": "tool.pre_invoke",
     "selector": {},
     "effect": "block",
-    "when": "arg_validation_errors == arg_validation_errors"
+    "when": "tool_args == tool_args"
   },
   "input": {
     "anchor": "tool.pre_invoke",

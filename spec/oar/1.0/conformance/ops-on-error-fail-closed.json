@@ -17,7 +17,10 @@
     "when": "prompt_injection_score > 0.8",
     "detector": {
       "ref": "detector://error"
-    }
+    },
+    "requires_facts": [
+      "prompt_injection_score"
+    ]
   },
   "input": {
     "anchor": "tool.pre_invoke",

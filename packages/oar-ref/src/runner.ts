@@ -5,9 +5,9 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { referenceAnchorProfile, referenceEnvironment, withHostFacts, type Environment } from './env.js';
-import { loadHint, loadRule, type Rule } from './load.js';
-import { CounterStore, decide, type Detector, type Occurrence } from './decide.js';
+import { referenceAnchorProfile, referenceEnvironment, validateAnchorProfile, withHostFacts, type Environment } from './env.js';
+import { loadRuleSet, type Rule } from './load.js';
+import { CounterStore, decide, ENGINE_MAINTAINED, type Detector, type Occurrence } from './decide.js';
 import type { Value } from './eval.js';
 
 export interface Fixture {
@@ -27,6 +27,8 @@ export interface Fixture {
     host_facts?: Record<string, string>;
     /** Overrides this engine's anchor profile map for the fixture. */
     profile?: { oar_profile_version: string; core: Record<string, string>; unsupported: string[] };
+    /** Earlier occurrences, evaluated in order in the same session before this one. */
+    occurrences?: { anchor: string; facts: Record<string, Value>; recent_tools?: string[] }[];
   };
   expected: {
     decision?: string;
@@ -51,6 +53,18 @@ export interface FixtureResult {
   readonly covers: readonly string[];
   readonly pass: boolean;
   readonly detail?: string;
+  /** What the engine actually produced, for comparison across engines. */
+  readonly actual?: Verdict;
+}
+
+export interface Verdict {
+  readonly error?: string;
+  readonly decision?: string;
+  readonly code?: string | null;
+  readonly applied?: readonly string[];
+  readonly on_fire?: readonly string[];
+  readonly counters?: Readonly<Record<string, Record<string, number>>>;
+  readonly copy?: Readonly<Record<string, string>> | null;
 }
 
 // The three detector references the corpus reserves. None needs a model or a
@@ -85,7 +99,8 @@ export async function loadFixtures(dir: string): Promise<Fixture[]> {
 
 // The closed fixture vocabulary ([OAR-CONF-13], [OAR-CONF-15]).
 const FIXTURE_KEYS = new Set(['id', 'title', 'covers', 'rule', 'hints', 'input', 'expected']);
-const INPUT_KEYS = new Set(['anchor', 'facts', 'recent_tools', 'session_id', 'host_facts', 'profile']);
+const INPUT_KEYS = new Set(['anchor', 'facts', 'recent_tools', 'session_id', 'host_facts', 'profile', 'occurrences']);
+const OCCURRENCE_KEYS = new Set(['anchor', 'facts', 'recent_tools']);
 const EXPECTED_KEYS = new Set(['decision', 'code', 'on_fire', 'applied', 'counters', 'copy', 'error']);
 
 /** The first member outside the fixture vocabulary, or null when the shape is closed. */
@@ -106,6 +121,20 @@ export function fixtureShapeError(fx: Fixture): string | null {
   for (const key of Object.keys(fx.expected ?? {})) {
     if (!EXPECTED_KEYS.has(key)) return `expected carries undefined key ${JSON.stringify(key)}`;
   }
+  for (const occ of fx.input?.occurrences ?? []) {
+    for (const key of Object.keys(occ)) {
+      if (!OCCURRENCE_KEYS.has(key)) return `occurrence carries undefined member ${JSON.stringify(key)}`;
+    }
+  }
+  // [OAR-CONF-13] Engine-maintained facts are reached through occurrences, never supplied.
+  for (const facts of [fx.input?.facts ?? {}, ...(fx.input?.occurrences ?? []).map((o) => o.facts ?? {})]) {
+    for (const name of ENGINE_MAINTAINED) {
+      if (name in facts) return `facts supply ${name}, which the engine maintains itself [OAR-FIRE-10]`;
+    }
+  }
+  if (fx.input?.occurrences && fx.input.session_id === undefined) {
+    return 'occurrences need a session_id to share';
+  }
   return null;
 }
 
@@ -121,69 +150,90 @@ export function runFixture(fx: Fixture): FixtureResult {
   // A fixture whose outcome turns on which core anchors a host supports carries
   // its own profile map, so every implementation is asked the same question.
   const fixtureProfile = fx.input?.profile;
-  const profile = fixtureProfile
-    ? { version: fixtureProfile.oar_profile_version, core: fixtureProfile.core, unsupported: fixtureProfile.unsupported }
-    : referenceAnchorProfile();
   const ruleDocs = Array.isArray(fx.rule) ? fx.rule : fx.rule !== undefined ? [fx.rule] : [];
   const hintDocs = Array.isArray(fx.hints) ? fx.hints : [];
 
   let rules: Rule[] = [];
+  let profile = referenceAnchorProfile();
   let loadError: string | null = null;
   try {
+    if (fixtureProfile) {
+      profile = validateAnchorProfile({
+        version: fixtureProfile.oar_profile_version,
+        core: fixtureProfile.core ?? {},
+        unsupported: fixtureProfile.unsupported ?? [],
+      });
+    }
     if (fx.input?.host_facts) env = withHostFacts(env, fx.input.host_facts);
-    rules = ruleDocs.map((doc) => loadRule(doc, { env, profile, detectors: DETECTOR_REFS }));
-    for (const doc of hintDocs) loadHint(doc);
+    rules = loadRuleSet(ruleDocs, hintDocs, { env, profile, detectors: DETECTOR_REFS }).rules;
   } catch (err) {
     loadError = err instanceof Error ? err.message : String(err);
   }
 
-  if (fx.expected.error !== undefined) {
-    if (loadError === null) {
-      return { ...base, pass: false, detail: `expected a load error containing ${JSON.stringify(fx.expected.error)}, the document loaded` };
+  if (loadError !== null) {
+    const actual: Verdict = { error: loadError };
+    if (fx.expected.error === undefined) {
+      return { ...base, pass: false, detail: `unexpected load error: ${loadError}`, actual };
     }
     if (!loadError.includes(fx.expected.error)) {
-      return { ...base, pass: false, detail: `load error ${JSON.stringify(loadError)} does not contain ${JSON.stringify(fx.expected.error)}` };
+      return { ...base, pass: false, detail: `load error ${JSON.stringify(loadError)} does not contain ${JSON.stringify(fx.expected.error)}`, actual };
     }
-    return { ...base, pass: true };
+    return { ...base, pass: true, actual };
   }
-  if (loadError !== null) {
-    return { ...base, pass: false, detail: `unexpected load error: ${loadError}` };
+  if (fx.expected.error !== undefined) {
+    return { ...base, pass: false, detail: `expected a load error containing ${JSON.stringify(fx.expected.error)}, the document loaded` };
   }
 
-  const anchor = profile.core[fx.input.anchor] ?? fx.input.anchor;
-  const occ: Occurrence = {
-    anchor,
-    facts: fx.input.facts ?? {},
-    recentTools: fx.input.recent_tools ?? [],
+  const toOccurrence = (o: { anchor: string; facts?: Record<string, Value>; recent_tools?: string[] }): Occurrence => ({
+    anchor: profile.core[o.anchor] ?? o.anchor,
+    facts: o.facts ?? {},
+    recentTools: o.recent_tools ?? [],
     sessionID: fx.input.session_id,
-  };
+  });
+  const store = new CounterStore();
+  const opts = { env, detectors: RESERVED_DETECTORS };
   let result: ReturnType<typeof decide>;
   try {
-    result = decide(rules, occ, { env, detectors: RESERVED_DETECTORS }, new CounterStore());
+    for (const earlier of fx.input.occurrences ?? []) decide(rules, toOccurrence(earlier), opts, store);
+    result = decide(rules, toOccurrence(fx.input), opts, store);
   } catch (err) {
     return { ...base, pass: false, detail: `engine error: ${err instanceof Error ? err.message : String(err)}` };
   }
 
+  const actual: Verdict = {
+    decision: result.decision?.effect ?? 'none',
+    code: result.decision?.code ?? null,
+    applied: result.trace.map((e) => `${e.rule}:${e.outcome}`),
+    on_fire: result.decision?.onFire ?? [],
+    counters: result.counters,
+    copy: result.decision?.copy ?? null,
+  };
+  const check = checkExpected(fx, result);
+  return check === null ? { ...base, pass: true, actual } : { ...base, pass: false, detail: check, actual };
+}
+
+/** The first way the result misses the fixture's expectation, or null. */
+function checkExpected(fx: Fixture, result: ReturnType<typeof decide>): string | null {
   const exp = fx.expected;
   if (exp.decision !== undefined) {
     const want = exp.decision.toLowerCase();
     if (want === 'none' || want === 'allow') {
       if (result.decision !== null) {
-        return { ...base, pass: false, detail: `expected no actionable decision, got ${result.decision.effect} ${result.decision.code}` };
+        return `expected no actionable decision, got ${result.decision.effect} ${result.decision.code}`;
       }
     } else {
       if (result.decision === null) {
-        return { ...base, pass: false, detail: `expected decision ${want}, got none` };
+        return `expected decision ${want}, got none`;
       }
       if (result.decision.effect !== want) {
-        return { ...base, pass: false, detail: `expected effect ${want}, got ${result.decision.effect} (${result.decision.code})` };
+        return `expected effect ${want}, got ${result.decision.effect} (${result.decision.code})`;
       }
       if (exp.code !== undefined && result.decision.code !== exp.code) {
-        return { ...base, pass: false, detail: `expected code ${exp.code}, got ${result.decision.code}` };
+        return `expected code ${exp.code}, got ${result.decision.code}`;
       }
       for (const action of exp.on_fire ?? []) {
         if (!result.decision.onFire.includes(action as never)) {
-          return { ...base, pass: false, detail: `expected on_fire ${action}, got ${result.decision.onFire.join(', ') || 'none'}` };
+          return `expected on_fire ${action}, got ${result.decision.onFire.join(', ') || 'none'}`;
         }
       }
     }
@@ -191,22 +241,22 @@ export function runFixture(fx: Fixture): FixtureResult {
   if (exp.applied !== undefined) {
     const got = result.trace.map((e) => `${e.rule}:${e.outcome}`);
     if (got.join(',') !== exp.applied.join(',')) {
-      return { ...base, pass: false, detail: `applied trace = [${got.join(', ')}], want [${exp.applied.join(', ')}]` };
+      return `applied trace = [${got.join(', ')}], want [${exp.applied.join(', ')}]`;
     }
   }
   if (exp.copy !== undefined) {
     if (result.decision === null) {
-      return { ...base, pass: false, detail: 'expected rendered copy, got no decision' };
+      return 'expected rendered copy, got no decision';
     }
     if (exp.copy === null) {
       if (result.decision.copy !== undefined) {
-        return { ...base, pass: false, detail: `expected no copy, got ${JSON.stringify(result.decision.copy)}` };
+        return `expected no copy, got ${JSON.stringify(result.decision.copy)}`;
       }
     } else {
       for (const [member, want] of Object.entries(exp.copy)) {
         const got = result.decision.copy?.[member];
         if (got !== want) {
-          return { ...base, pass: false, detail: `copy ${member} = ${JSON.stringify(got ?? null)}, want ${JSON.stringify(want)}` };
+          return `copy ${member} = ${JSON.stringify(got ?? null)}, want ${JSON.stringify(want)}`;
         }
       }
     }
@@ -215,11 +265,11 @@ export function runFixture(fx: Fixture): FixtureResult {
     for (const [kind, value] of Object.entries(want)) {
       const got = result.counters[code]?.[kind] ?? 0;
       if (got !== value) {
-        return { ...base, pass: false, detail: `counter ${code}/${kind} = ${got}, want ${value}` };
+        return `counter ${code}/${kind} = ${got}, want ${value}`;
       }
     }
   }
-  return { ...base, pass: true };
+  return null;
 }
 
 export interface RunReport {

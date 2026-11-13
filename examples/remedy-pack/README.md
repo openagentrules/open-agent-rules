@@ -5,22 +5,21 @@ documents a host raises by code. It exists because the guard pipeline decides fr
 facts at lifecycle moments, and some situations a host handles — a capped tool output, a
 truncated result, a phase gate, a redaction receipt — are observed by the host's own
 machinery, not by the guard pipeline. No fact exists for a rule to read, so neither
-`enforce` nor `monitor` fits: there is nothing to enforce. Earlier drafts published such
-copy as `enforcement: off` rules; 1.0 removes `off` and makes the channel first-class —
-the hint (section 9, [`[OAR-HINT-1]`](../../spec/oar/1.0/open-agent-rules.md)).
+`enforce` nor `monitor` fits: there is nothing to enforce. The channel for that copy is the
+hint (section 9, [`[OAR-HINT-1]`](../../spec/oar/1.0/open-agent-rules.md)).
 
 | File | What it demonstrates |
 |------|----------------------|
 | [`rules.yaml`](rules.yaml) | The rule half: a guard-pipeline rule whose copy binds host-tier facts. |
 | [`hints.yaml`](hints.yaml) | The hint half: four copy publications keyed by the codes a host raises. |
 | [`host-facts.yaml`](host-facts.yaml) | The host catalog convention this pack assumes (host-side, non-normative). |
-| `fixtures/` | Seven replays against the reference implementation, including the zero-value and hint-does-not-perturb cases. |
+| `fixtures/` | Replays against the reference implementation, including the zero-value and hint-does-not-perturb cases. |
 
 ## The rule half: copy that binds a host fact
 
 `rules.yaml` carries one rule, `RETRY_CAP_REFUSED`. The host publishes its own retry
-accounting under its namespace — `paintedwolf.attempts`, `paintedwolf.breaker_open`,
-`paintedwolf.redaction_count` — as host-tier facts ([`[OAR-FACT-15]`]). The rule names all
+accounting under its namespace — `example.attempts`, `example.breaker_open`,
+`example.redaction_count` — as host-tier facts ([`[OAR-FACT-15]`]). The rule names all
 three in `requires_facts` ([`[OAR-COPY-5]`]): the declaration is what makes the binding
 legal and reviewable, because a reader can see exactly which host observations the copy
 depends on before reading a word of it. The copy then interpolates an int
@@ -32,8 +31,8 @@ is portable to any engine whose host provides the same facts.
 
 ## The hint half: copy keyed by a code
 
-`hints.yaml` carries four hints — the 1.0-native shape of the painted-wolf pack's
-enforcement-off units. A hint is a copy publication, not a rule:
+`hints.yaml` carries four hints for situations a host raises after or outside the guard
+pipeline. A hint is a copy publication, not a rule:
 
 - it never evaluates — no `when`, no `effect`, no side-effects ([`[OAR-HINT-1]`]);
 - its `id` is the code the host raises ([`[OAR-HINT-2]`]);
@@ -73,12 +72,12 @@ a hint being loaded.
 Copy that binds a fact must read correctly when the fact is at its zero value or absent:
 
 - A binding at zero substitutes the zero value, not a gap ([`[OAR-COPY-7]`],
-  [`[OAR-FACT-25]`]): `paintedwolf.redaction_count` at `0` renders "applied 0 redactions",
+  [`[OAR-FACT-25]`]): `example.redaction_count` at `0` renders "applied 0 redactions",
   never "applied  redactions". `fixtures/retry-cap-zero-binding.json` pins it.
 - A declared fact absent from the occurrence reads as its zero value ([`[OAR-FACT-24]`]),
   so a conditional on an unreported bool takes the else branch and the sentence still
   parses. `fixtures/retry-cap-zero-conditional.json` pins it.
-- A zero fact is a value, not an absence: `paintedwolf.attempts` at `0` simply does not
+- A zero fact is a value, not an absence: `example.attempts` at `0` simply does not
   satisfy `>= 3`, and the rule does not fire. `fixtures/retry-cap-below-threshold.json`
   pins it.
 

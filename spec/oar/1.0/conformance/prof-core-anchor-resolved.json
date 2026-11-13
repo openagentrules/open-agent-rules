@@ -13,7 +13,10 @@
     "on": "agent.post_turn",
     "selector": {},
     "effect": "nudge",
-    "when": "not_found"
+    "when": "not_found",
+    "requires_facts": [
+      "not_found"
+    ]
   },
   "input": {
     "anchor": "agent.post_turn",

@@ -2,7 +2,7 @@
 # guard pipeline has no fact for ([OAR-HINT-1]). A hint publishes copy keyed by
 # the code the host raises ([OAR-HINT-2]); the copy is static — no bindings
 # ([OAR-HINT-3]) — and the hint never evaluates ([OAR-HINT-1]). These four are
-# the 1.0-native shape of the painted-wolf pack's enforcement-off units.
+# situations a host raises after or outside the guard pipeline.
 spec_version: "1.0"
 id: TOOL_OUTPUT_SPILL_CAPPED
 namespace: example.remedy

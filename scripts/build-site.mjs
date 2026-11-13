@@ -354,7 +354,7 @@ ${linkHeadings(body)}
 </article>
 </main>
 <footer>
-<nav><a href="https://github.com/paintedwolf-ai/open-agent-rules">Repository</a><a href="/spec/governance.html">Governance</a><a href="/spec/rationale.html">Rationale</a><a href="/spec/licence.html">Licence</a><a href="/spec/patents.html">Patents</a></nav>
+<nav><a href="https://github.com/openagentrules/open-agent-rules">Repository</a><a href="/spec/governance.html">Governance</a><a href="/spec/rationale.html">Rationale</a><a href="/spec/licence.html">Licence</a><a href="/spec/patents.html">Patents</a></nav>
 <p>Specification text CC BY 4.0. Schemas, corpus, and code Apache-2.0. A published patent
 non-assertion covenant covers every implementation.
 Anyone may implement this specification, for any purpose, without permission, notification, or fee.</p>
@@ -400,7 +400,7 @@ canonical schema <code class="url">${BASE}oar.schema.json</code></p>
   <li><a href="/spec/${VERSION}/conformance.html">Run the conformance corpus</a></li>
   <li><a href="/examples/portable-pack.html">A worked rule pack</a></li>
   <li><a href="/examples/remedy-pack.html">The hint channel</a></li>
-  <li><a href="https://github.com/paintedwolf-ai/open-agent-rules">Repository</a></li>
+  <li><a href="https://github.com/openagentrules/open-agent-rules">Repository</a></li>
 </ul>
 ${renderMarkdown(rationaleMd)}`,
   }),

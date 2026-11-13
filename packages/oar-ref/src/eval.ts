@@ -209,21 +209,33 @@ function zeroValue(type: string): Value {
   throw new EvalError(`fact type ${type} has no zero value`);
 }
 
-// JSON has one number type, so an int fact arrives as a JS number and is
-// widened to the bigint the type check reasoned about.
+// [OAR-FACT-18] A value is checked against its declared type before the
+// condition reads it. A violation is a fact-provider failure, never a coercion.
+// JSON has one number type, so an int arrives as a JS number and is widened to
+// the bigint the type check reasoned about — only when it is exact.
 function coerce(raw: Value, type: string): Value {
-  if (type === 'int' && typeof raw === 'number') {
-    if (!Number.isInteger(raw)) throw new EvalError(`int fact received ${raw}`);
-    return BigInt(raw);
+  const fail = (): never => {
+    throw new EvalError(`fact value ${JSON.stringify(typeof raw === 'bigint' ? String(raw) : raw)} is not a ${type}`);
+  };
+  switch (type) {
+    case 'bool': return typeof raw === 'boolean' ? raw : fail();
+    case 'string': return typeof raw === 'string' ? raw : fail();
+    case 'int':
+      if (typeof raw === 'bigint') return raw;
+      return typeof raw === 'number' && Number.isSafeInteger(raw) ? BigInt(raw) : fail();
+    case 'double':
+      // [OAR-FACT-17] A non-finite double is a fact-provider failure.
+      return typeof raw === 'number' && Number.isFinite(raw) ? raw : fail();
+    case 'list<string>':
+      return Array.isArray(raw) && raw.every((v) => typeof v === 'string') ? raw : fail();
+    case 'list<map<string, dyn>>':
+      return Array.isArray(raw) && raw.every(isPlainObject) ? raw : fail();
+    case 'map<string, dyn>':
+      return isPlainObject(raw) ? raw : fail();
   }
-  if (type === 'double') {
-    // [OAR-FACT-17] A non-finite double is a fact-provider failure, never a
-    // value the engine coerces or defaults.
-    const n = typeof raw === 'bigint' ? Number(raw) : raw;
-    if (typeof n === 'number' && !Number.isFinite(n)) {
-      throw new EvalError('double fact is not finite');
-    }
-    if (typeof raw === 'bigint') return n;
-  }
-  return raw;
+  return fail();
+}
+
+function isPlainObject(v: unknown): boolean {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
 }

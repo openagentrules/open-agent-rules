@@ -2,7 +2,7 @@
   "id": "ops-mandatory-monitor-rejected",
   "title": "A mandatory rule cannot be monitored",
   "covers": [
-    "OAR-OPS-12"
+    "OAR-OPS-9"
   ],
   "rule": {
     "spec_version": "1.0",

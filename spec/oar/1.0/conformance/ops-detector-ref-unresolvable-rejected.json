@@ -2,7 +2,7 @@
   "id": "ops-detector-ref-unresolvable-rejected",
   "title": "A detector-kind rule whose reference cannot be resolved is rejected at load",
   "covers": [
-    "OAR-OPS-10"
+    "OAR-OPS-11"
   ],
   "rule": {
     "spec_version": "1.0",

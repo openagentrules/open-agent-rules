@@ -11,7 +11,10 @@
     "selector": {},
     "effect": "block",
     "when": "mcp_field_int(\"count\") > 0",
-    "on_error": "fail_open"
+    "on_error": "fail_open",
+    "requires_facts": [
+      "mcp_field_int"
+    ]
   },
   "input": {
     "anchor": "tool.post_invoke",

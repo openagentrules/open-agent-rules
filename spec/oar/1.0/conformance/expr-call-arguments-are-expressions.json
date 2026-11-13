@@ -11,7 +11,7 @@
     "on": "tool.pre_invoke",
     "selector": {},
     "effect": "block",
-    "when": "size(tool + \"s\") == size(\"reads\") && path_outside_scope(tool) == false"
+    "when": "size(tool + \"s\") == size(\"reads\") && starts_with(tool + \"x\", \"rea\")"
   },
   "input": {
     "anchor": "tool.pre_invoke",

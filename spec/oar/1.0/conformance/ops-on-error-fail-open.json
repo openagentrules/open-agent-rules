@@ -16,7 +16,10 @@
     "on_error": "fail_open",
     "detector": {
       "ref": "detector://error"
-    }
+    },
+    "requires_facts": [
+      "prompt_injection_score"
+    ]
   },
   "input": {
     "anchor": "tool.pre_invoke",

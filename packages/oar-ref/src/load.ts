@@ -26,15 +26,30 @@ export class RuleLoadError extends Error {
 }
 
 export const SUPPORTED_SPEC_VERSIONS = ['1.0'] as const;
+// The version this engine implements: it accepts its major at any minor up to
+// its own ([OAR-DOC-3]).
+const IMPLEMENTED = { major: 1, minor: 0 };
+const VERSION_RE = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+
+/** [OAR-DOC-3] The version gate, applied before anything else ([OAR-CONF-2]). */
+function checkVersion(specVersion: string): void {
+  const m = VERSION_RE.exec(specVersion);
+  if (!m) throw new RuleLoadError(`spec_version ${JSON.stringify(specVersion)} is not <major>.<minor>`);
+  if (Number(m[1]) !== IMPLEMENTED.major || Number(m[2]) > IMPLEMENTED.minor) {
+    throw new RuleLoadError(
+      `unsupported spec_version ${JSON.stringify(specVersion)} (this engine implements ${IMPLEMENTED.major}.${IMPLEMENTED.minor})`,
+    );
+  }
+}
 
 export type Kind = 'schema' | 'policy' | 'invariant' | 'detector';
-export type Effect = 'block' | 'warn' | 'nudge' | 'allow' | 'transform';
+export type Effect = 'block' | 'warn' | 'nudge' | 'allow';
 export type OnFireAction =
   | 'increment_counter' | 'reset_counter' | 'publish_event'
   | 'increment_breaker' | 'reset_breaker';
 
 const KINDS: readonly Kind[] = ['schema', 'policy', 'invariant', 'detector'];
-const EFFECTS: readonly Effect[] = ['block', 'warn', 'nudge', 'allow', 'transform'];
+const EFFECTS: readonly Effect[] = ['block', 'warn', 'nudge', 'allow'];
 const ON_FIRE: readonly OnFireAction[] = [
   'increment_counter', 'reset_counter', 'publish_event',
   'increment_breaker', 'reset_breaker',
@@ -55,6 +70,8 @@ const DOCUMENT_FIELDS = new Set([
 
 const NAMESPACE_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
 const ID_RE = /^[A-Z][A-Z0-9_]*$/;
+// [OAR-DOC-19] The only names outside the document model a document may carry.
+const EXTENSION_RE = /^x-[a-z0-9]+(-[a-z0-9]+)*$/;
 
 export interface Rule {
   specVersion: string;
@@ -75,6 +92,8 @@ export interface Rule {
   detectorRef: string | null;
   /** Parsed copy members ([OAR-DOC-18], Appendix B). Empty when none. */
   copy: Readonly<Record<string, readonly CopyPart[]>>;
+  /** Rule ids named by fire_count_of / breaker_count_of, resolved over the rule set. */
+  counterRefs: readonly string[];
 }
 
 /** Identity is the (namespace, id) pair; the rendered code stays the bare id. */
@@ -95,18 +114,11 @@ export function loadRule(doc: unknown, opts: LoadOptions): Rule {
   }
   const d = doc as Record<string, unknown>;
 
-  const specVersion = requireString(d, 'spec_version');
-  if (!/^[0-9]+\.[0-9]+$/.test(specVersion)) {
-    throw new RuleLoadError(`spec_version ${JSON.stringify(specVersion)} is not <major>.<minor>`);
-  }
-  if (!(SUPPORTED_SPEC_VERSIONS as readonly string[]).includes(specVersion)) {
-    throw new RuleLoadError(
-      `unsupported spec_version ${JSON.stringify(specVersion)} (want one of ${SUPPORTED_SPEC_VERSIONS.join(', ')})`,
-    );
-  }
+  checkVersion(requireString(d, 'spec_version'));
+  const specVersion = d['spec_version'] as string;
 
   for (const key of Object.keys(d)) {
-    if (key.startsWith('x-')) continue;
+    if (EXTENSION_RE.test(key)) continue;
     if (!DOCUMENT_FIELDS.has(key)) {
       throw new RuleLoadError(`rule carries undefined field ${JSON.stringify(key)}`);
     }
@@ -153,7 +165,7 @@ export function loadRule(doc: unknown, opts: LoadOptions): Rule {
     throw new RuleLoadError(`rule ${id} has mandatory ${JSON.stringify(d['mandatory'])}, want a boolean`);
   }
   if (d['mandatory'] === true && enforcement === 'monitor') {
-    // [OAR-OPS-12] A rule cannot be both required and not enforced.
+    // [OAR-OPS-9] A rule cannot be both required and not enforced.
     throw new RuleLoadError(`rule ${id} is mandatory and cannot have enforcement monitor`);
   }
   const stream = String(d['stream'] ?? 'buffered');
@@ -216,20 +228,21 @@ export function loadRule(doc: unknown, opts: LoadOptions): Rule {
     }
     copy[member] = parseCopyTemplate(id, member, raw, opts.env);
   }
-  // [OAR-COPY-5] A non-core fact named only in copy is still a fact the rule
-  // references: copy is presentation, not an exemption from the portability
-  // contract, so it must be reached through requires_facts.
-  const whenRefs = new Set<string>();
-  if (ast) conditionIdents(ast, whenRefs);
+  // [OAR-DOC-22], [OAR-COPY-5] Every non-core name the condition or the copy
+  // references is listed in requires_facts, so portability reads off the document.
+  const refs = new Set<string>();
+  if (ast) conditionIdents(ast, refs, opts.env);
+  for (const name of copyReferences(Object.values(copy).flat())) refs.add(name);
   const requiresNames = new Set(asArray(d['requires_facts']).map(String));
-  for (const name of copyReferences(Object.values(copy).flat())) {
-    const decl = opts.env.facts[name];
-    if (!decl || decl.tier === 'core') continue;
-    if (requiresNames.has(name) || whenRefs.has(name)) continue;
+  for (const name of refs) {
+    const tier = opts.env.facts[name]?.tier ?? opts.env.functions[name]?.tier;
+    if (tier === undefined || tier === 'core' || requiresNames.has(name)) continue;
     throw new RuleLoadError(
-      `rule ${id} copy references ${name}, which is not a core fact and is not reached through requires_facts`,
+      `rule ${id} references ${name}, which is not a core fact and is not listed in requires_facts`,
     );
   }
+  const counterRefs: string[] = [];
+  if (ast) counterCalls(ast, counterRefs);
 
   return {
     specVersion, id, namespace, kind, on, resolvedOn, selector, when, ast,
@@ -237,27 +250,91 @@ export function loadRule(doc: unknown, opts: LoadOptions): Rule {
     effect, enforcement,
     mandatory: d['mandatory'] === true,
     onError: typeof d['on_error'] === 'string' ? d['on_error'] : 'fail_closed',
-    onFire, detectorRef, copy,
+    onFire, detectorRef, copy, counterRefs,
   };
 }
 
-/** Every fact name a condition references, for the [OAR-COPY-5] check. */
-function conditionIdents(node: Node, out: Set<string>): void {
+/** The rule ids a condition passes to fire_count_of and breaker_count_of. */
+function counterCalls(node: Node, out: string[]): void {
+  switch (node.kind) {
+    case 'call':
+      if (COUNTER_FUNCTIONS.has(node.name) && node.args[0]?.kind === 'string') out.push(node.args[0].value);
+      for (const arg of node.args) counterCalls(arg, out);
+      break;
+    case 'list': for (const item of node.items) counterCalls(item, out); break;
+    case 'unary': counterCalls(node.operand, out); break;
+    case 'ternary': counterCalls(node.cond, out); counterCalls(node.then, out); counterCalls(node.other, out); break;
+    case 'binary': counterCalls(node.left, out); counterCalls(node.right, out); break;
+    default: break;
+  }
+}
+
+const COUNTER_FUNCTIONS = new Set(['fire_count_of', 'breaker_count_of']);
+
+export interface RuleSet {
+  rules: Rule[];
+  hints: Hint[];
+}
+
+/**
+ * Load a rule set ([OAR-DOC-27]): each document on its own, then the checks
+ * that span documents — unique identities, on_error substitutes, counter
+ * references, and unique hint codes.
+ */
+export function loadRuleSet(ruleDocs: readonly unknown[], hintDocs: readonly unknown[], opts: LoadOptions): RuleSet {
+  const rules = ruleDocs.map((doc) => loadRule(doc, opts));
+  const hints = hintDocs.map((doc) => loadHint(doc));
+  const seen = new Set<string>();
+  for (const rule of rules) {
+    const key = identity(rule);
+    if (seen.has(key)) throw new RuleLoadError(`rule set holds two rules with identity ${key} [OAR-DOC-28]`);
+    seen.add(key);
+  }
+  const inNamespace = (namespace: string, id: string) =>
+    rules.some((r) => r.namespace === namespace && r.id === id);
+  for (const rule of rules) {
+    if (rule.onError !== 'fail_closed' && rule.onError !== 'fail_open' && !inNamespace(rule.namespace, rule.onError)) {
+      throw new RuleLoadError(`rule ${identity(rule)} on_error names ${rule.onError}, which is not a rule of its namespace in the rule set [OAR-OPS-4]`);
+    }
+    for (const ref of rule.counterRefs) {
+      if (!inNamespace(rule.namespace, ref)) {
+        throw new RuleLoadError(`rule ${identity(rule)} reads the counters of ${ref}, which is not a rule of its namespace in the rule set [OAR-FIRE-6]`);
+      }
+    }
+  }
+  const codes = new Set<string>();
+  for (const hint of hints) {
+    if (codes.has(hint.id)) throw new RuleLoadError(`rule set holds two hints with code ${hint.id} [OAR-HINT-2]`);
+    codes.add(hint.id);
+  }
+  return { rules, hints };
+}
+
+/** Every fact and function name a condition references, for [OAR-DOC-22]. */
+function conditionIdents(node: Node, out: Set<string>, env: Environment): void {
   switch (node.kind) {
     case 'ident': out.add(node.name); break;
-    case 'select': out.add(node.target); break;
-    case 'list': for (const item of node.items) conditionIdents(item, out); break;
-    case 'unary': conditionIdents(node.operand, out); break;
+    case 'select': {
+      // A dotted host fact is one name; otherwise the target map is the reference.
+      const flat = `${node.target}.${node.field}`;
+      out.add(env.facts[flat] ? flat : node.target);
+      break;
+    }
+    case 'list': for (const item of node.items) conditionIdents(item, out, env); break;
+    case 'unary': conditionIdents(node.operand, out, env); break;
     case 'ternary':
-      conditionIdents(node.cond, out);
-      conditionIdents(node.then, out);
-      conditionIdents(node.other, out);
+      conditionIdents(node.cond, out, env);
+      conditionIdents(node.then, out, env);
+      conditionIdents(node.other, out, env);
       break;
     case 'binary':
-      conditionIdents(node.left, out);
-      conditionIdents(node.right, out);
+      conditionIdents(node.left, out, env);
+      conditionIdents(node.right, out, env);
       break;
-    case 'call': for (const arg of node.args) conditionIdents(arg, out); break;
+    case 'call':
+      out.add(node.name);
+      for (const arg of node.args) conditionIdents(arg, out, env);
+      break;
     default: break;
   }
 }
@@ -298,18 +375,11 @@ export function loadHint(doc: unknown): Hint {
   }
   const d = doc as Record<string, unknown>;
 
-  const specVersion = requireString(d, 'spec_version');
-  if (!/^[0-9]+\.[0-9]+$/.test(specVersion)) {
-    throw new RuleLoadError(`spec_version ${JSON.stringify(specVersion)} is not <major>.<minor>`);
-  }
-  if (!(SUPPORTED_SPEC_VERSIONS as readonly string[]).includes(specVersion)) {
-    throw new RuleLoadError(
-      `unsupported spec_version ${JSON.stringify(specVersion)} (want one of ${SUPPORTED_SPEC_VERSIONS.join(', ')})`,
-    );
-  }
+  checkVersion(requireString(d, 'spec_version'));
+  const specVersion = d['spec_version'] as string;
 
   for (const key of Object.keys(d)) {
-    if (key.startsWith('x-')) continue;
+    if (EXTENSION_RE.test(key)) continue;
     if (!HINT_FIELDS.has(key)) {
       if (HINT_EVALUATION_FIELDS.has(key)) {
         throw new RuleLoadError(
@@ -464,6 +534,9 @@ export function checkType(node: Node, env: Environment, ruleID: string): CelType
       if (!fn) {
         return fail(`condition calls ${JSON.stringify(node.name)}, which is not a declared observation function [OAR-EXPR-16]`);
       }
+      if (COUNTER_FUNCTIONS.has(node.name) && node.args[0]?.kind !== 'string') {
+        return fail(`${node.name} takes a string literal naming a rule [OAR-FIRE-6]`);
+      }
       if (node.args.length !== 1) {
         return fail(`observation function ${node.name} takes one argument, got ${node.args.length} [OAR-EXPR-16]`);
       }
@@ -474,6 +547,9 @@ export function checkType(node: Node, env: Environment, ruleID: string): CelType
       return fn.returns;
     }
     case 'unary': {
+      // [OAR-EXPR-15] -9223372036854775808 is the least int, written as unary
+      // minus over a literal one past INT64_MAX.
+      if (node.op === '-' && node.operand.kind === 'int' && node.operand.value === INT64_MAX + 1n) return 'int';
       const t = checkType(node.operand, env, ruleID);
       if (node.op === '!') {
         if (t !== 'bool') return fail(`! applied to ${t} [OAR-EXPR-8]`);

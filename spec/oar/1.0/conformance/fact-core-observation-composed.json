@@ -12,7 +12,11 @@
     "on": "tool.pre_invoke",
     "selector": {},
     "effect": "block",
-    "when": "not_found && !is_directory && tool == \"read\""
+    "when": "not_found && !is_directory && tool == \"read\"",
+    "requires_facts": [
+      "is_directory",
+      "not_found"
+    ]
   },
   "input": {
     "anchor": "tool.pre_invoke",

@@ -186,9 +186,9 @@ test('copy bindings render against the occurrence facts', () => {
   // [OAR-COPY-8] whitespace inside the delimiters is insignificant.
   assert.deepEqual(parseCopyTemplate('R', 'what', '{{ tool }}', env), parseCopyTemplate('R', 'what', '{{tool}}', env));
   // A list<string> joins with ", "; an empty list renders as the empty string.
-  const list = parseCopyTemplate('R', 'fix', 'errors: {{ arg_validation_errors }}', env);
-  assert.equal(renderCopy(list, { arg_validation_errors: ['a', 'b'] }, env), 'errors: a, b');
-  assert.equal(renderCopy(list, { arg_validation_errors: [] }, env), 'errors: ');
+  const list = parseCopyTemplate('R', 'fix', 'servers: {{ mcp_enabled_servers }}', env);
+  assert.equal(renderCopy(list, { mcp_enabled_servers: ['a', 'b'] }, env), 'servers: a, b');
+  assert.equal(renderCopy(list, { mcp_enabled_servers: [] }, env), 'servers: ');
 });
 
 test('copy bindings are validated at load', () => {
@@ -211,7 +211,7 @@ test('copy bindings are validated at load', () => {
   assert.throws(() => loadRule({ ...base, what: '{% endif %}' }, LOADOPTS), /outside a conditional/);
 });
 
-test('a non-core fact named only in copy must be reached through requires_facts', () => {
+test('every non-core name the condition or copy references is listed in requires_facts', () => {
   const base = {
     spec_version: '1.0', id: 'R', kind: 'policy', on: 'tool.pre_invoke',
     selector: {}, effect: 'block', when: 'tool == "x"',
@@ -224,9 +224,10 @@ test('a non-core fact named only in copy must be reached through requires_facts'
     { ...base, requires_facts: ['prompt_injection_score'], what: 'score {{ prompt_injection_score }}' },
     LOADOPTS,
   );
-  loadRule(
-    { ...base, when: 'prompt_injection_score > 0.5', what: 'score {{ prompt_injection_score }}' },
-    LOADOPTS,
+  // [OAR-DOC-22] The condition is held to the same rule as the copy.
+  assert.throws(
+    () => loadRule({ ...base, when: 'prompt_injection_score > 0.5', what: 'score {{ prompt_injection_score }}' }, LOADOPTS),
+    /requires_facts/,
   );
 });
 
@@ -253,7 +254,8 @@ test('an on_error block omits copy whose observation failed ([OAR-COPY-10])', ()
     {
       spec_version: '1.0', id: 'R', kind: 'policy', on: 'tool.pre_invoke', selector: {},
       effect: 'block', when: 'prompt_injection_score > 0.5', on_error: 'fail_closed',
-      what: 'errors: {{ arg_validation_errors }}',
+      requires_facts: ['prompt_injection_score', 'mcp_enabled_servers'],
+      what: 'servers: {{ mcp_enabled_servers }}',
     },
     LOADOPTS,
   );
@@ -262,7 +264,7 @@ test('an on_error block omits copy whose observation failed ([OAR-COPY-10])', ()
   // so rendering fails too: the block stands without copy, nothing coerced.
   const r = decide(
     [rule],
-    { anchor: 'tool.pre_invoke', facts: { prompt_injection_score: 1e999, arg_validation_errors: [1] } },
+    { anchor: 'tool.pre_invoke', facts: { prompt_injection_score: 1e999, mcp_enabled_servers: [1] } },
     { env: LOADOPTS.env },
   );
   assert.equal(r.decision?.effect, 'block');
@@ -282,7 +284,7 @@ test('a substitute on_error block carries the substitute rule\'s copy', () => {
     {
       spec_version: '1.0', id: 'BAD', kind: 'policy', on: 'tool.pre_invoke', selector: {},
       effect: 'block', when: 'prompt_injection_score > 0.5', on_error: 'SUB',
-      what: 'bad {{ arg_validation_errors }}',
+      requires_facts: ['prompt_injection_score'], what: 'bad',
     },
     LOADOPTS,
   );

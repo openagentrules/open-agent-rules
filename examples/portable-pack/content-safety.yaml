@@ -1,4 +1,4 @@
-# The content-safety surface ([OAR-OPS-9], [OAR-OPS-10]): a registered detector
+# The content-safety surface ([OAR-OPS-10], [OAR-OPS-11]): a registered detector
 # publishes observations — scores, spans — and the rule owns every threshold.
 # Two rules over the same detector, separated by a YAML `---`: that is a *rule
 # set*, and a member's position in one has no effect on its identity, ordering,

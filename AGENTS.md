@@ -4,7 +4,7 @@ Instructions and guidelines for AI coding assistants and contributors working in
 
 ## 1. Project Context & Status
 
-- **Status:** Open Agent Rules (OAR) is currently a **pre-v1 candidate specification**.
+- **Status:** Open Agent Rules (OAR) 1.0 is the current version. It becomes published, and immutable, when `scripts/freeze-spec.sh --publish 1.0` records it in `spec/published.json`; until then its tree is editable.
 - **Maintainer Model:** Maintained by a solo author (publishing through Painted Wolf LLC) who aims to donate/transition the specification and its assets to a vendor-neutral standards organization (e.g., W3C, IETF, Linux Foundation, or OASIS).
 - **Core Philosophy:** **High technical rigor, zero synthetic bureaucracy.** We enforce strict engineering quality (schema validity, comprehensive test fixtures, reference runner, and cross-engine differential validation), but avoid faux-parliamentary review hurdles, artificial multi-party submission barriers, or premature freeze ceremonies.
 

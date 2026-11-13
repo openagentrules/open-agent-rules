@@ -91,9 +91,10 @@
       "file": "detector-threshold-in-when.json",
       "title": "A detector supplies a score and the rule owns the threshold",
       "covers": [
-        "OAR-OPS-9",
+        "OAR-OPS-10",
         "OAR-FACT-9",
-        "OAR-CONF-18"
+        "OAR-CONF-18",
+        "OAR-FACT-6"
       ]
     },
     {
@@ -101,7 +102,7 @@
       "file": "detector-threshold-not-crossed.json",
       "title": "The same detector score below the rule's threshold produces no decision",
       "covers": [
-        "OAR-OPS-9"
+        "OAR-OPS-10"
       ]
     },
     {
@@ -118,6 +119,14 @@
       "title": "A detector-kind document without a detector reference is rejected at load",
       "covers": [
         "OAR-DOC-17"
+      ]
+    },
+    {
+      "id": "doc-effect-outside-vocabulary-rejected",
+      "file": "doc-effect-outside-vocabulary-rejected.json",
+      "title": "An effect outside the four this version defines is rejected at load",
+      "covers": [
+        "OAR-DOC-8"
       ]
     },
     {
@@ -155,6 +164,15 @@
       ]
     },
     {
+      "id": "doc-non-core-reference-must-be-listed",
+      "file": "doc-non-core-reference-must-be-listed.json",
+      "title": "A rule referencing a standard-profile fact it does not list is rejected at load",
+      "covers": [
+        "OAR-DOC-22",
+        "OAR-PROF-5"
+      ]
+    },
+    {
       "id": "doc-profile-field-is-informational",
       "file": "doc-profile-field-is-informational.json",
       "title": "The profile field records intent and derives no behaviour",
@@ -168,6 +186,15 @@
       "title": "Interoperability taxonomy tags are telemetry and change nothing",
       "covers": [
         "OAR-DOC-16"
+      ]
+    },
+    {
+      "id": "doc-rule-set-duplicate-identity-rejected",
+      "file": "doc-rule-set-duplicate-identity-rejected.json",
+      "title": "A rule set holding two rules with one identity is rejected at load",
+      "covers": [
+        "OAR-DOC-28",
+        "OAR-DOC-27"
       ]
     },
     {
@@ -222,13 +249,12 @@
       ]
     },
     {
-      "id": "effect-transform-decision-shape",
-      "file": "effect-transform-decision-shape.json",
-      "title": "A transform rule produces a transform decision rather than a block",
+      "id": "doc-version-leading-zero-rejected",
+      "file": "doc-version-leading-zero-rejected.json",
+      "title": "A spec_version with a leading zero is not a version",
       "covers": [
-        "OAR-OPS-8",
-        "OAR-DOC-8",
-        "OAR-FACT-6"
+        "OAR-DOC-3",
+        "OAR-CONF-2"
       ]
     },
     {
@@ -264,6 +290,15 @@
         "OAR-EVAL-1",
         "OAR-EVAL-2",
         "OAR-CONF-10"
+      ]
+    },
+    {
+      "id": "eval-namespace-breaks-identifier-ties",
+      "file": "eval-namespace-breaks-identifier-ties.json",
+      "title": "Rules of one kind and id order by namespace",
+      "covers": [
+        "OAR-EVAL-1",
+        "OAR-DOC-21"
       ]
     },
     {
@@ -431,6 +466,14 @@
       ]
     },
     {
+      "id": "expr-least-int-literal",
+      "file": "expr-least-int-literal.json",
+      "title": "The least int is written as unary minus over 9223372036854775808",
+      "covers": [
+        "OAR-EXPR-15"
+      ]
+    },
+    {
       "id": "expr-map-member-selected",
       "file": "expr-map-member-selected.json",
       "title": "A dotted reference selects a member of a map fact",
@@ -577,6 +620,15 @@
       ]
     },
     {
+      "id": "fact-int-out-of-range-fails-provider",
+      "file": "fact-int-out-of-range-fails-provider.json",
+      "title": "An int fact outside 64 bits routes the rule through on_error",
+      "covers": [
+        "OAR-FACT-17",
+        "OAR-OPS-2"
+      ]
+    },
+    {
       "id": "fact-mcp-accessor-wrong-type-errors",
       "file": "fact-mcp-accessor-wrong-type-errors.json",
       "title": "A typed mcp accessor reading a member of another type is a fact-provider failure",
@@ -598,15 +650,6 @@
       "title": "A condition that does not evaluate to a boolean is rejected at load",
       "covers": [
         "OAR-FACT-3"
-      ]
-    },
-    {
-      "id": "fact-non-finite-double-fails-provider",
-      "file": "fact-non-finite-double-fails-provider.json",
-      "title": "A double fact that is not finite routes the rule through on_error",
-      "covers": [
-        "OAR-FACT-17",
-        "OAR-OPS-2"
       ]
     },
     {
@@ -653,6 +696,14 @@
       ]
     },
     {
+      "id": "fire-counter-of-unknown-rule-rejected",
+      "file": "fire-counter-of-unknown-rule-rejected.json",
+      "title": "Reading the counters of a rule outside the rule set is rejected at load",
+      "covers": [
+        "OAR-FIRE-6"
+      ]
+    },
+    {
       "id": "fire-counter-read-before-increment",
       "file": "fire-counter-read-before-increment.json",
       "title": "A condition reads the counter value from before this occurrence's own increment",
@@ -663,10 +714,29 @@
     {
       "id": "fire-counter-threshold-crossing",
       "file": "fire-counter-threshold-crossing.json",
-      "title": "The threshold on an engine counter lives in the rule, not in the engine",
+      "title": "A rule reads another rule's counter on a later occurrence",
       "covers": [
         "OAR-FIRE-3",
-        "OAR-FIRE-4"
+        "OAR-FIRE-4",
+        "OAR-FIRE-6"
+      ]
+    },
+    {
+      "id": "fire-counters-keyed-by-identity",
+      "file": "fire-counters-keyed-by-identity.json",
+      "title": "Rules sharing an id under different namespaces keep separate counters",
+      "covers": [
+        "OAR-FIRE-4",
+        "OAR-DOC-21"
+      ]
+    },
+    {
+      "id": "fire-counting-rule-feeds-escalation",
+      "file": "fire-counting-rule-feeds-escalation.json",
+      "title": "An allow rule that counts feeds a rule that escalates on the count",
+      "covers": [
+        "OAR-FIRE-6",
+        "OAR-FIRE-5"
       ]
     },
     {
@@ -694,6 +764,41 @@
       ]
     },
     {
+      "id": "fire-same-call-run-breaks-on-different-arguments",
+      "file": "fire-same-call-run-breaks-on-different-arguments.json",
+      "title": "A call with different arguments ends the run of the same call",
+      "covers": [
+        "OAR-FIRE-9"
+      ]
+    },
+    {
+      "id": "fire-same-call-run-ignores-member-order",
+      "file": "fire-same-call-run-ignores-member-order.json",
+      "title": "same_call_run compares arguments as JSON values, ignoring member order",
+      "covers": [
+        "OAR-FIRE-9",
+        "OAR-FACT-20",
+        "OAR-FIRE-10"
+      ]
+    },
+    {
+      "id": "fire-same-code-reject-run-counts-blocks",
+      "file": "fire-same-code-reject-run-counts-blocks.json",
+      "title": "same_code_reject_run counts the latest blocks carrying one identifier",
+      "covers": [
+        "OAR-FIRE-8",
+        "OAR-FIRE-10"
+      ]
+    },
+    {
+      "id": "fire-same-code-reject-run-resets",
+      "file": "fire-same-code-reject-run-resets.json",
+      "title": "A decision other than a block ends the run of blocks",
+      "covers": [
+        "OAR-FIRE-8"
+      ]
+    },
+    {
       "id": "flow-sequence-does-not-match",
       "file": "flow-sequence-does-not-match.json",
       "title": "A flow whose steps appear out of order does not match",
@@ -716,6 +821,14 @@
       "title": "Hint copy carrying a binding is rejected at load",
       "covers": [
         "OAR-HINT-3"
+      ]
+    },
+    {
+      "id": "hint-duplicate-code-rejected",
+      "file": "hint-duplicate-code-rejected.json",
+      "title": "Two hints with one code are rejected at load, whatever their namespace",
+      "covers": [
+        "OAR-HINT-2"
       ]
     },
     {
@@ -784,7 +897,7 @@
       "file": "ops-detector-ref-unresolvable-rejected.json",
       "title": "A detector-kind rule whose reference cannot be resolved is rejected at load",
       "covers": [
-        "OAR-OPS-10"
+        "OAR-OPS-11"
       ]
     },
     {
@@ -792,7 +905,7 @@
       "file": "ops-mandatory-monitor-rejected.json",
       "title": "A mandatory rule cannot be monitored",
       "covers": [
-        "OAR-OPS-12"
+        "OAR-OPS-9"
       ]
     },
     {
@@ -817,7 +930,7 @@
       "file": "ops-monitor-error-produces-no-decision.json",
       "title": "A monitored rule that cannot be evaluated produces no decision",
       "covers": [
-        "OAR-OPS-11"
+        "OAR-OPS-8"
       ]
     },
     {
@@ -868,6 +981,14 @@
       ]
     },
     {
+      "id": "ops-on-error-unknown-substitute-rejected",
+      "file": "ops-on-error-unknown-substitute-rejected.json",
+      "title": "An on_error naming no rule of the rule set is rejected at load",
+      "covers": [
+        "OAR-OPS-4"
+      ]
+    },
+    {
       "id": "ops-severity-does-not-affect-decision",
       "file": "ops-severity-does-not-affect-decision.json",
       "title": "Severity is telemetry only: an info-severity rule still produces its declared effect",
@@ -892,6 +1013,14 @@
       "covers": [
         "OAR-PROF-3",
         "OAR-CONF-19",
+        "OAR-PROF-2"
+      ]
+    },
+    {
+      "id": "prof-profile-map-names-every-anchor",
+      "file": "prof-profile-map-names-every-anchor.json",
+      "title": "An anchor profile map that omits a core anchor is rejected",
+      "covers": [
         "OAR-PROF-2"
       ]
     },

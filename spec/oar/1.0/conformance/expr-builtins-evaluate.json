@@ -11,7 +11,7 @@
     "on": "tool.pre_invoke",
     "selector": {},
     "effect": "block",
-    "when": "starts_with(tool, \"re\") && ends_with(tool, \"ad\") && contains(tool, \"ea\") && size(tool) == 4 && size(arg_validation_errors) == 0 && size(tool_args) == 1"
+    "when": "starts_with(tool, \"re\") && ends_with(tool, \"ad\") && contains(tool, \"ea\") && size(tool) == 4 && size(tool_args) == 1 && size([\"a\", \"b\"]) == 2"
   },
   "input": {
     "anchor": "tool.pre_invoke",

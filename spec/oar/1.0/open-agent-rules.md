@@ -59,9 +59,10 @@ otherwise.
   whose `kind` is `hint` is a hint document, not a rule: it MUST contain `spec_version`,
   `id`, and `kind`, MUST NOT contain `on`, `selector`, or `effect`, and is governed by
   section 9.
-- **[OAR-DOC-3]** `spec_version` is a string of the form `<major>.<minor>`. An engine MUST
-  reject a document whose `spec_version` it does not support, and MUST NOT silently
-  downgrade or coerce it.
+- **[OAR-DOC-3]** `spec_version` is a string `<major>.<minor>` of two non-negative decimal
+  integers without leading zeros, matching `^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`. An engine
+  implementing version `M.n` MUST accept a document whose major is `M` and whose minor is at
+  most `n`, and MUST reject any other, without downgrading or coercing it.
 - **[OAR-DOC-4]** `id` is a stable identifier matching `^[A-Z][A-Z0-9_]*$`. It MUST NOT be
   reused for a rule with a different meaning once published.
 - **[OAR-DOC-5]** `title` is an optional human-readable label. It MUST NOT affect any
@@ -74,7 +75,7 @@ otherwise.
   and presentation only. An engine MUST NOT let `severity` affect selection, condition
   evaluation, ordering, precedence, or the returned decision. Two rules differing only in
   `severity` MUST produce identical decisions.
-- **[OAR-DOC-8]** `effect` MUST be one of `block`, `warn`, `nudge`, `allow`, `transform`.
+- **[OAR-DOC-8]** `effect` MUST be one of `block`, `warn`, `nudge`, `allow`.
 - **[OAR-DOC-9]** `when` is an optional condition, written in the language of Appendix C,
   over the declared fact environment (section 5). When absent, the rule's condition is
   satisfied.
@@ -103,26 +104,39 @@ otherwise.
 
 Every field in this subsection is optional.
 
-- **[OAR-DOC-19]** A document MAY carry implementation extension fields whose names begin
-  with `x-`. An engine MUST ignore an `x-` field it does not recognise, and MUST reject a
+- **[OAR-DOC-19]** A document MAY carry implementation extension fields whose names match
+  `^x-[a-z0-9]+(-[a-z0-9]+)*$`. An engine MUST ignore an `x-` field it does not recognise, and MUST reject a
   document carrying any other field this specification does not define. An `x-` field MUST
   NOT become normative without a specification change.
 - **[OAR-DOC-20]** `namespace` is an optional publisher scope matching
   `^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$`. It identifies the
   organisation publishing the rule.
-- **[OAR-DOC-21]** The identity of a rule is the pair (`namespace`, `id`). An absent
-  `namespace` means the loading host's own scope. Two documents sharing an `id` under
-  different namespaces MUST NOT collide. The identifier an engine renders in its decision,
+- **[OAR-DOC-21]** The identity of a rule is the pair (`namespace`, `id`), written
+  `<namespace>/<id>`, or `<id>` when `namespace` is absent. An absent `namespace` means the
+  loading host's own scope. Two documents sharing an `id` under different namespaces MUST
+  NOT collide: ordering, counters, the trace, and `on_error` substitution all use the
+  identity. The identifier an engine renders in its decision,
   and that downstream software branches on, remains the bare `id` — see `[OAR-EVAL-7]`.
-- **[OAR-DOC-22]** `requires_facts` is an optional list of fact names the rule needs. An
-  engine that does not provide one of them MUST reject the rule at load, naming both the
-  rule and the fact, rather than failing condition compilation or evaluating a default
-  value.
+- **[OAR-DOC-22]** `requires_facts` is an optional list of the facts and observation
+  functions outside the `core` tier that the rule's condition and copy reference. A rule MUST
+  list every such name it references, and an engine MUST reject at load a rule that
+  references one it does not list, naming it. An engine that does not provide a listed name
+  MUST reject the rule at load, naming both the rule and the name, rather than failing
+  condition compilation or evaluating a default value. Portability is therefore readable from
+  the document alone.
 - **[OAR-DOC-23]** `profile` is an optional informational string, one of `portable` or
   `host`, recording the author's intent. An engine MUST NOT derive behaviour from it; the
   portability of a rule is determined by its anchor and its facts, not by this field.
 
-### 2.2 Example (non-normative)
+### 2.2 Rule sets
+
+- **[OAR-DOC-27]** A *rule set* is the documents an engine loads together: a JSON array of
+  documents, or a YAML stream of documents separated by `---`. Rule and hint documents MAY be
+  mixed. Validation that concerns more than one document happens over the rule set, at load.
+- **[OAR-DOC-28]** Rule identities MUST be unique within a rule set. An engine MUST reject at
+  load a rule set holding two rules with the same identity (`[OAR-DOC-21]`), naming it.
+
+### 2.3 Example (non-normative)
 
 ```json
 {
@@ -132,7 +146,8 @@ Every field in this subsection is optional.
   "kind": "policy",
   "on": "tool.pre_invoke",
   "selector": { "tools": ["read"] },
-  "when": "path_outside_scope(\"read\")",
+  "requires_facts": ["path_outside_scope"],
+  "when": "path_outside_scope",
   "effect": "block",
   "on_error": "fail_closed"
 }
@@ -169,12 +184,13 @@ narrows a rule to a subset of the occurrences of that moment.
 ## 4. Evaluation
 
 - **[OAR-EVAL-1]** An engine MUST evaluate selected rules in a deterministic order: ascending
-  by `kind` in the sequence `schema`, `policy`, `invariant`, `detector`; then ascending
-  lexicographically by `id`.
+  by `kind` in the sequence `schema`, `policy`, `invariant`, `detector`; then ascending by
+  `id`; then ascending by `namespace`, an absent `namespace` first. Identifiers and namespaces
+  compare by Unicode code point.
 - **[OAR-EVAL-2]** `kind` carries no evaluation meaning beyond that order. An engine MUST
   NOT derive a threshold, a weight, or a decision from `kind`, and this specification does
   not define a separate priority field.
-- **[OAR-EVAL-3]** The first selected rule that fires with effect `block` or `transform`
+- **[OAR-EVAL-3]** The first selected enforced rule that fires with effect `block`
   MUST short-circuit the anchor occurrence: no later rule in the order is evaluated.
 - **[OAR-EVAL-4]** An engine MUST resolve the decision for an anchor occurrence by
   precedence: if any rule fired with `block`, the decision is `block`; otherwise if any
@@ -201,8 +217,7 @@ narrows a rule to a subset of the occurrences of that moment.
   the action at the occurrence does not proceed; `nudge` — the action proceeds, and the
   decision's copy is delivered to the agent as guidance for its next step; `warn` — the action
   proceeds, and the decision is surfaced as a caution without asking the agent to change
-  course; `transform` — the action proceeds with the replacement of `[OAR-OPS-8]`. `allow`
-  produces no decision (`[OAR-EVAL-5]`). `nudge` outranks `warn` because it asks the agent to
+  course. `allow` produces no decision (`[OAR-EVAL-5]`). `nudge` outranks `warn` because it asks the agent to
   act.
 
 ---
@@ -252,7 +267,8 @@ narrows a rule to a subset of the occurrences of that moment.
 - **[OAR-FACT-15]** An engine MUST publish each `host`-tier fact under a namespace it owns,
   written `<host>.<fact>`, so that two engines cannot collide on a bare name. An engine MAY
   additionally accept the bare name inside its own deployment; a rule that uses the bare
-  name is not portable.
+  name is not portable. The namespace `example` is reserved for examples and the conformance
+  corpus, and an engine MUST NOT publish facts under it outside them.
 
 ### 5.2 Core facts
 
@@ -261,23 +277,24 @@ Every conforming engine provides these.
 <!-- oar:table core-facts -->
 | Fact | Type | Observation |
 |------|------|-------------|
-| `tool` | `string` | The name of the tool being invoked at this anchor occurrence. |
-| `tool_args` | `map<string, dyn>` | The arguments the tool was called with, as a map. |
-| `arg_validation_errors` | `list<string>` | Machine codes for argument checks that did not pass. Empty when the arguments validated. |
-| `tool_args_fingerprint` | `string` | A stable digest of the tool name and arguments, for identifying a repeat of the same call. |
-| `breaker_count` | `int` | How many times a circuit breaker has been incremented for this rule and session. |
-| `fire_count` | `int` | How many times `increment_counter` has been applied for this rule and session since its last `reset_counter`. |
-| `same_code_reject_run` | `int` | How many consecutive rejections carrying the same identifier this session has produced. |
-| `is_directory` | `bool` | True when a path argument resolved to a directory. |
-| `not_found` | `bool` | True when a path or artifact the call names does not exist. |
+| `tool` | `string` | The name of the tool being invoked at this anchor occurrence. Empty at an anchor where no tool is invoked. |
+| `tool_args` | `map<string, dyn>` | The arguments the tool was called with, as a map. Empty at an anchor where no tool is invoked. |
+| `fire_count` | `int` | How many times increment_counter has been applied for this rule and session since its last reset_counter. |
+| `breaker_count` | `int` | How many times increment_breaker has been applied for this rule and session since its last reset_breaker. |
+| `same_code_reject_run` | `int` | The length of the run of blocks carrying one identifier that ends at the latest earlier occurrence of this anchor in the session, as [OAR-FIRE-8] defines it. |
+| `same_call_run` | `int` | How many of the latest earlier occurrences of this anchor in the session, unbroken, invoked the same tool with the same arguments as this one, as [OAR-FIRE-9] defines it. |
 <!-- /oar:table -->
+
+The four counting facts are maintained by the engine itself (`[OAR-FIRE-10]`), so they mean
+the same thing on every engine.
 
 ### 5.3 Core observation functions
 
 <!-- oar:table core-functions -->
 | Function | Signature | Observation |
 |----------|-----------|-------------|
-| `path_outside_scope` | `(string) -> bool` | True when the named tool's path arguments resolve outside the scope in force for that tool. |
+| `fire_count_of` | `(string) -> int` | The fire_count of the named rule in the reading rule's namespace, for this session. |
+| `breaker_count_of` | `(string) -> int` | The breaker_count of the named rule in the reading rule's namespace, for this session. |
 <!-- /oar:table -->
 
 ### 5.4 Standard profiles
@@ -287,6 +304,14 @@ it implements. Rules using a profile's facts are portable between engines that i
 that profile.
 
 <!-- oar:table standard-profiles -->
+**Profile `filesystem`**
+
+| Name | Type | Observation |
+|------|------|-------------|
+| `is_directory` | `bool` | True when a path argument resolved to a directory. |
+| `not_found` | `bool` | True when a path or artifact the call names does not exist. |
+| `path_outside_scope` | `bool` | True when a path argument of the call resolves outside the scope in force for its tool. |
+
 **Profile `content-safety`**
 
 | Name | Type | Observation |
@@ -334,11 +359,10 @@ by `in` (Appendix C); the two functions reach the members selection cannot type.
   engine MUST NOT declare a fact and a function under the same name. A condition language
   that distinguishes them syntactically is not sufficient, because an engine may be hosted
   in a language that does not.
-- **[OAR-FACT-20]** `tool_args_fingerprint` is a digest of the tool name and the tool's
-  arguments, computed so that the same tool with the same arguments yields the same digest
-  and a different tool, different arguments, or a different argument order yields a
-  different one. The digest MUST be stable across sessions and across engines claiming the
-  core, so a rule keyed on a repeat of the same call behaves identically everywhere.
+- **[OAR-FACT-20]** Two occurrences invoke *the same call* when their `tool` values are equal
+  and their `tool_args` are equal as JSON values: objects with the same member names whose
+  values are equal, whatever the member order; arrays with equal members in the same order;
+  numbers with the same value; strings with the same code points; and equal literals.
 - **[OAR-FACT-21]** A fact's value is fixed at the occurrence: every rule evaluated at one
   anchor occurrence observes the same value for the same fact, and a rule MUST NOT observe
   a value that differs between two evaluations at the same occurrence.
@@ -378,11 +402,26 @@ by `in` (Appendix C); the two functions reach the members selection cannot type.
   rule's own increment cannot change the value its own condition just read.
 - **[OAR-FIRE-6]** `increment_counter` and `reset_counter` maintain the counter the core fact
   `fire_count` reads; `increment_breaker` and `reset_breaker` maintain the one `breaker_count`
-  reads. Each is keyed as `[OAR-FIRE-4]` requires, so a rule reads and changes only its own
-  counters.
+  reads. Each is keyed as `[OAR-FIRE-4]` requires, so a rule changes only its own counters. A
+  rule reads another rule's counters with `fire_count_of` and `breaker_count_of`, whose
+  argument MUST be a string literal naming the `id` of a rule with the same namespace in the
+  rule set; an engine MUST reject at load any other argument, naming it. A counting rule with
+  effect `allow` can therefore feed an escalating rule that reads its count.
 - **[OAR-FIRE-7]** `publish_event` emits one event to the host's audit channel carrying the
   rule identity (`[OAR-DOC-21]`), the anchor, and the rule's effect. It writes no fact, and an
   engine MUST NOT let it affect the decision, the trace, or any counter.
+- **[OAR-FIRE-8]** `same_code_reject_run` at an occurrence is computed over the decisions the
+  engine returned at earlier occurrences of the same anchor in the same session, latest
+  first. When the latest was not a `block`, or there is none, it is `0`. Otherwise it is the
+  number of consecutive latest decisions that were blocks carrying the latest one's
+  identifier.
+- **[OAR-FIRE-9]** `same_call_run` at an occurrence is the number of consecutive latest
+  earlier occurrences of the same anchor in the same session that invoked the same call as
+  this one (`[OAR-FACT-20]`), or `0` when the latest did not.
+- **[OAR-FIRE-10]** An engine MUST maintain `fire_count`, `breaker_count`,
+  `same_code_reject_run`, and `same_call_run` itself, per session, across occurrences, and a
+  fact provider MUST NOT supply them. Like counters, they reflect only earlier occurrences
+  and the state before this occurrence's side-effects (`[OAR-FIRE-5]`).
 
 ---
 
@@ -401,7 +440,9 @@ by `in` (Appendix C); the two functions reach the members selection cannot type.
   an engine MUST produce a `block`
   decision carrying that substituted identifier instead of the rule's own, and MUST NOT
   continue evaluating later rules at the occurrence. The substitution replaces the
-  identifier only; the effect is `block`.
+  identifier only; the effect is `block`. The identifier MUST be the `id` of a rule with the
+  same namespace in the rule set, and an engine MUST reject at load an `on_error` naming any
+  other.
 - **[OAR-OPS-5]** A rule with `mandatory: true` is evaluated and enforced whenever it is
   selected. Any host mechanism that disables rules, changes their enforcement, or removes
   them from a loaded rule set — an overlay, a pack replacement, a caller option — MUST refuse
@@ -412,13 +453,10 @@ by `in` (Appendix C); the two functions reach the members selection cannot type.
 - **[OAR-OPS-7]** An engine MUST record, per anchor occurrence, an applied-rules trace: for
   each selected rule, its identifier and its outcome — one of fired, passed, errored, or
   monitored. The trace is how an operator audits a decision.
-- **[OAR-OPS-8]** A rule with effect `transform` MUST produce a decision that identifies the
-  content to be replaced and the replacement. An engine that does not implement content
-  mutation MUST reject such a rule at load rather than treating it as a `block`.
-- **[OAR-OPS-11]** A rule whose `enforcement` is `monitor` and that cannot be evaluated MUST
+- **[OAR-OPS-8]** A rule whose `enforcement` is `monitor` and that cannot be evaluated MUST
   be recorded as errored and MUST NOT produce a decision, whatever its `on_error`. Monitoring
   never acts, including on its own failures; `on_error` governs only enforced rules.
-- **[OAR-OPS-12]** An engine MUST reject at load a document with `mandatory: true` and
+- **[OAR-OPS-9]** An engine MUST reject at load a document with `mandatory: true` and
   `enforcement: monitor`, naming the rule. A rule cannot be both required and not enforced.
 
 ### 7.1 Content-safety surface
@@ -426,9 +464,9 @@ by `in` (Appendix C); the two functions reach the members selection cannot type.
 Model input and output are anchors like any other, and a content-safety guardrail is an
 ordinary rule: a detector publishes observation facts, and the rule sets the threshold.
 
-- **[OAR-OPS-9]** A detector MUST return observations — scores, spans, entity lists — and
+- **[OAR-OPS-10]** A detector MUST return observations — scores, spans, entity lists — and
   MUST NOT return a verdict. The rule's condition owns every threshold.
-- **[OAR-OPS-10]** A detector reference is a URI of the form `detector://<name>`. An engine
+- **[OAR-OPS-11]** A detector reference is a URI of the form `detector://<name>`. An engine
   MUST reject a `kind: detector` rule whose reference it cannot resolve.
 
 ---
@@ -449,8 +487,8 @@ moments a host has) and the **fact profile** (which observations it publishes).
 - **[OAR-PROF-4]** A host MAY accept host-native `on` values naming anchors in its own
   catalogue. Such rules are valid OAR documents and MUST load; they are not portable.
 - **[OAR-PROF-5]** A rule is **portable** if and only if its `on` is a core anchor and its
-  condition references only `core`-tier facts, facts from standard profiles it declares, and
-  observation functions of those tiers. This specification promises identical behaviour
+  condition and copy reference only `core`-tier facts and functions and the standard-profile
+  names it lists in `requires_facts`. This specification promises identical behaviour
   across conforming engines for portable rules only.
 - **[OAR-PROF-6]** An engine MUST reject at load any rule listing in `requires_facts` a fact
   it does not provide, naming the rule and the fact.
@@ -466,7 +504,7 @@ moments a host has) and the **fact profile** (which observations it publishes).
 | `tool.pre_invoke` | Before a tool call is dispatched, with the tool name and arguments observable and nothing executed yet. |
 | `tool.handler` | Inside the tool's own handler, after argument validation and before the effect it performs. |
 | `tool.post_invoke` | After a tool call returns, with the result observable and before it is handed back to the agent. |
-| `agent.post_turn` | After an agent produces a turn that called no tool — the moment a claim can be checked against evidence. |
+| `agent.post_turn` | After an agent produces a turn, with the turn's content observable — the moment a claim can be checked against evidence. |
 | `agent.finalize` | After a worker or child agent completes and its summary is available. |
 | `model.input` | User and retrieved content assembled for the model, before the model consumes it. |
 | `model.output` | A model response, before it is shown to a person or acted on. |
@@ -508,7 +546,9 @@ presentation copy keyed by a code, and takes no part in evaluation at all.
   rule set and MUST NOT select or evaluate them.
 - **[OAR-HINT-2]** A hint document's `id` is the code the host raises. It follows the
   identifier grammar of `[OAR-DOC-4]`. A hint MUST carry at least one copy field
-  (`[OAR-DOC-18]`): a hint that publishes no copy is not a hint.
+  (`[OAR-DOC-18]`): a hint that publishes no copy is not a hint. Because a host raises a bare
+  code, hint `id`s MUST be unique among the hints of a rule set whatever their namespace, and
+  an engine MUST reject a duplicate at load, naming it.
 - **[OAR-HINT-3]** A hint's copy is static. It MUST NOT carry the bindings of Appendix B:
   the host raising a code has no fact environment, and there is nothing for a binding to
   name. Copy members a hint omits are simply absent.
@@ -549,8 +589,8 @@ identified so a conformance fixture can cite it.
 
 - **[OAR-CONF-1]** Load each rule document and validate it against the published OAR schema.
   An engine MUST reject a document that fails validation, naming the failing field.
-- **[OAR-CONF-2]** An engine MUST reject a document whose `spec_version` major is
-  unsupported, before any other processing of that document.
+- **[OAR-CONF-2]** An engine MUST apply the version gate of `[OAR-DOC-3]` before any other
+  processing of a document.
 - **[OAR-CONF-3]** An engine MUST resolve `on`: a core anchor identifier through the anchor
   profile map, any other value as a host-native anchor identifier.
 - **[OAR-CONF-4]** An engine MUST reject a rule whose `requires_facts` are not all provided
@@ -566,7 +606,7 @@ identified so a conformance fixture can cite it.
 - **[OAR-CONF-9]** An engine MUST record but not act on a rule whose `enforcement` is
   `monitor`: no effect, no side-effect, no short-circuit.
 - **[OAR-CONF-10]** An engine MUST order evaluation by `kind` then `id`, and the first
-  enforced rule firing with `block` or `transform` MUST short-circuit the occurrence.
+  enforced rule firing with `block` MUST short-circuit the occurrence.
 - **[OAR-CONF-11]** An engine MUST apply decision precedence: `block`, then `nudge`, then
   `warn`, otherwise allow.
 - **[OAR-CONF-12]** An engine MUST apply the `on_fire` actions of every rule that fired and
@@ -579,9 +619,13 @@ identified so a conformance fixture can cite it.
   `hints` is a list of hint documents (`[OAR-HINT-1]`) the engine loads and never evaluates.
   `input` carries the `anchor` at which the occurrence happens and a `facts` map, and MAY carry
   `recent_tools` (the recent activity window `flow` matches against), `session_id` (the
-  scope counters are keyed by), `host_facts` (a map naming each `host`-tier fact the
-  fixture supplies and its declared type, `[OAR-FACT-25]`), and `profile` (an anchor
-  profile map). `expected` describes the outcome the engine MUST produce.
+  session counters are keyed by), `host_facts` (a map naming each `host`-tier fact the
+  fixture supplies and its declared type, `[OAR-FACT-25]`), `profile` (an anchor profile
+  map), and `occurrences` (a list of earlier occurrences, each with its own `anchor`, `facts`,
+  and optional `recent_tools`, which the engine evaluates in order in the same session before
+  the fixture's own). `facts` MUST NOT carry the engine-maintained facts of `[OAR-FIRE-10]`; a
+  fixture reaches them through `occurrences`. `expected` describes the outcome the engine
+  MUST produce at the fixture's own occurrence, with counters as they stand after it.
 - **[OAR-CONF-19]** When `input.profile` is present, an engine running the fixture MUST
   resolve the fixture's `on` values through that map instead of its own, and MUST otherwise
   behave exactly as it would for its own map. A fixture whose outcome depends on which core
@@ -593,20 +637,22 @@ identified so a conformance fixture can cite it.
   it is about. `decision` is the effect the occurrence resolves to, or `none` when nothing
   actionable is produced. `code` is the identifier the decision carries. `on_fire` lists the
   side-effects the winning rule declared. `applied` is the ordered applied-rules trace, each
-  entry written `<rule id>:<outcome>` with the outcome one of `fired`, `passed`, `errored`,
-  `monitor`. `counters` maps a rule identifier to the counter values expected after the
-  occurrence. `copy` maps copy members to the rendered text the decision carries
+  entry written `<identity>:<outcome>` (`[OAR-DOC-21]`) with the outcome one of `fired`,
+  `passed`, `errored`, `monitor`. `counters` maps a rule identity to the values of its
+  `fire_count` and `breaker_count` expected after the occurrence. `copy` maps copy members to the rendered text the decision carries
   (`[OAR-COPY-7]`) and asserts only the members it names; `null` asserts that the decision
   carries no copy (`[OAR-COPY-10]`). `error` asserts a load-time rejection and matches when
-  the engine's error contains the given text; an engine MUST NOT be required to match error
-  wording beyond that substring. An engine MUST reject a fixture carrying any other `expected` key rather than
+  the engine's error contains the given text, which is a single machine token — a field
+  name, an identifier, a literal, or a clause identifier — never a phrase, so that no engine
+  is held to another's wording. An engine MUST reject a fixture carrying any other `expected` key rather than
   passing it silently.
 - **[OAR-CONF-16]** An implementation claiming conformance MUST pass every fixture in the
-  published corpus whose clauses fall within the profiles it declares, and MUST report which
-  fixtures it skipped and why.
-- **[OAR-CONF-17]** Every fixture in the published corpus MUST use core anchors and facts of
-  `core` or `standard` tier only, so that a fixture can be run by an implementation that
-  models no host-specific state.
+  published corpus except those whose rules list in `requires_facts` a name from a standard
+  profile it does not claim, and MUST report which fixtures it skipped and why.
+- **[OAR-CONF-17]** Every fixture in the published corpus MUST use core anchors, `core` facts,
+  standard-profile facts, and `host`-tier facts it declares itself in `input.host_facts`
+  under the reserved namespace `example` (`[OAR-FACT-15]`), so that a fixture can be run by
+  an implementation that models no host of its own.
 - **[OAR-CONF-18]** Three detector references are reserved for the corpus, and an engine
   running it MUST provide all three: `detector://noop` reports no findings; `detector://error`
   always fails, which is how a fixture reaches the `on_error` path; and `detector://fixture`
@@ -804,7 +850,8 @@ escape         = "\" ( "\" | '"' | "'" | "n" | "r" | "t" ) ;
   handled per its `on_error`. An engine MUST NOT wrap an integer or produce an infinity or NaN.
 - **[OAR-EXPR-15]** An `int` literal MUST fit in a signed 64-bit integer and a `double`
   literal MUST have a finite nearest binary64 value. An engine MUST reject any other literal
-  at load.
+  at load, except that `9223372036854775808` is admitted as the immediate operand of unary
+  `-`, so that the least `int` can be written.
 
 ### C.3 Calls and built-in functions
 

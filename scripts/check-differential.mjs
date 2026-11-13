@@ -47,15 +47,9 @@ function normalise(v) {
   const out = {};
   if (v.decision !== undefined) out.decision = v.decision ?? 'none';
   out.code = v.code ?? null;
-  out.rule = v.rule ?? null;
   out.applied = Array.isArray(v.applied) ? v.applied : [];
   out.on_fire = Array.isArray(v.on_fire) ? v.on_fire : [];
-  out.skipped_transforms = Array.isArray(v.skipped_transforms) ? v.skipped_transforms : [];
-  out.transforms = Array.isArray(v.transforms) ? v.transforms : [];
-  out.advisories = Array.isArray(v.advisories) ? v.advisories.map(a => ({ ...a, copy: a.copy ?? {} })) : [];
   out.counters = v.counters ?? {};
-  out.events = Array.isArray(v.events) ? v.events : [];
-  out.content = v.content ?? null;
   out.copy = v.copy ?? {};
   return out;
 }
@@ -119,7 +113,7 @@ for (const id of fixtures) {
   if (va.pass === false || va.passed === false || vb.pass === false || vb.passed === false) {
     disagreements.push({ id, kind: "conformance failure", a: va.error ?? va.message, b: vb.error ?? vb.message });
   }
-  // Shared capability skips are comparable ([OAR-CONF-20]).
+  // Skips are comparable: both engines must skip the same fixtures ([OAR-CONF-16]).
   if (va.skipped !== vb.skipped) {
     disagreements.push({ id, kind: 'skip', a: va.skipped ? 'skipped' : 'ran', b: vb.skipped ? 'skipped' : 'ran' });
     continue;

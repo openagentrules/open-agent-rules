@@ -53,11 +53,12 @@ curl -O https://openagentrules.org/spec/1.0/conformance/manifest.json
 
 Load the manifest, fetch and run each fixture it names through your evaluator, and compare
 against `expected`. Report the fixtures you skipped and why — a skipped fixture is not a
-passed fixture. Every fixture lists the clauses it exercises, so a failure tells you which
+passed fixture, and only a fixture whose rules need a standard profile you do not claim may be
+skipped. Every fixture lists the clauses it exercises, so a failure tells you which
 sentence you and the specification disagree about.
 
-A reference runner ships here and needs no account and no monorepo. Point it at a local
-checkout, or at the published manifest URL and it fetches the fixtures itself:
+A reference runner ships here and needs no account and no monorepo. It reads the corpus from a
+local checkout:
 
 ```bash
 npm ci --prefix packages/oar-ref

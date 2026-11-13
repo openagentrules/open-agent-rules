@@ -21,49 +21,64 @@ core:
   facts:
     - name: tool
       type: string
-      observation: The name of the tool being invoked at this anchor occurrence.
+      observation: >-
+        The name of the tool being invoked at this anchor occurrence. Empty at
+        an anchor where no tool is invoked.
     - name: tool_args
       type: map<string, dyn>
-      observation: The arguments the tool was called with, as a map.
-    - name: arg_validation_errors
-      type: list<string>
       observation: >-
-        Machine codes for argument checks that did not pass. Empty when the
-        arguments validated.
-    - name: tool_args_fingerprint
-      type: string
-      observation: >-
-        A stable digest of the tool name and arguments, for identifying a
-        repeat of the same call.
-    - name: breaker_count
-      type: int
-      observation: >-
-        How many times a circuit breaker has been incremented for this rule and
-        session.
+        The arguments the tool was called with, as a map. Empty at an anchor
+        where no tool is invoked.
     - name: fire_count
       type: int
       observation: >-
         How many times increment_counter has been applied for this rule and
         session since its last reset_counter.
+    - name: breaker_count
+      type: int
+      observation: >-
+        How many times increment_breaker has been applied for this rule and
+        session since its last reset_breaker.
     - name: same_code_reject_run
       type: int
       observation: >-
-        How many consecutive rejections carrying the same identifier this
-        session has produced.
-    - name: is_directory
-      type: bool
-      observation: True when a path argument resolved to a directory.
-    - name: not_found
-      type: bool
-      observation: True when a path or artifact the call names does not exist.
-  functions:
-    - name: path_outside_scope
-      type: (string) -> bool
+        The length of the run of blocks carrying one identifier that ends at
+        the latest earlier occurrence of this anchor in the session, as
+        [OAR-FIRE-8] defines it.
+    - name: same_call_run
+      type: int
       observation: >-
-        True when the named tool's path arguments resolve outside the scope in
-        force for that tool.
+        How many of the latest earlier occurrences of this anchor in the
+        session, unbroken, invoked the same tool with the same arguments as
+        this one, as [OAR-FIRE-9] defines it.
+  functions:
+    - name: fire_count_of
+      type: (string) -> int
+      observation: >-
+        The fire_count of the named rule in the reading rule's namespace, for
+        this session.
+    - name: breaker_count_of
+      type: (string) -> int
+      observation: >-
+        The breaker_count of the named rule in the reading rule's namespace,
+        for this session.
 
 profiles:
+  - name: filesystem
+    description: >-
+      A host whose tools address paths in a filesystem it can inspect.
+    facts:
+      - name: is_directory
+        type: bool
+        observation: True when a path argument resolved to a directory.
+      - name: not_found
+        type: bool
+        observation: True when a path or artifact the call names does not exist.
+      - name: path_outside_scope
+        type: bool
+        observation: >-
+          True when a path argument of the call resolves outside the scope in
+          force for its tool.
   - name: content-safety
     description: >-
       A host that submits model-facing content to registered detectors and
@@ -159,8 +174,8 @@ anchors:
       handed back to the agent.
   - name: agent.post_turn
     moment: >-
-      After an agent produces a turn that called no tool — the moment a claim
-      can be checked against evidence.
+      After an agent produces a turn, with the turn's content observable — the
+      moment a claim can be checked against evidence.
   - name: agent.finalize
     moment: After a worker or child agent completes and its summary is available.
   - name: model.input

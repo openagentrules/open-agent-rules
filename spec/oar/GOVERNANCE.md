@@ -134,8 +134,8 @@ plain fact takes a distinguishing suffix — `server_enabled` is the fact, `serv
 the function — because facts and functions share one namespace
 (`[OAR-FACT-19]`).
 
-**Profile names** are lowercase, hyphenated where they need a second word: `content-safety`,
-`mcp`.
+**Profile names** are lowercase, hyphenated where they need a second word: `filesystem`,
+`content-safety`, `mcp`.
 
 **Host fact namespaces** use the host's own short name as the prefix, and are reserved to the
 host that publishes them.

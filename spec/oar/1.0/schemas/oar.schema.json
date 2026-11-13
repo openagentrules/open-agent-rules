@@ -38,8 +38,8 @@
       "properties": {
         "spec_version": {
           "type": "string",
-          "pattern": "^[0-9]+\\.[0-9]+$",
-          "description": "OAR spec version this document targets. An engine rejects a major it does not support, before any other processing ([OAR-DOC-3])."
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "description": "OAR spec version this document targets. An engine implementing M.n accepts major M at minor n or below, and rejects any other ([OAR-DOC-3])."
         },
         "id": {
           "type": "string",
@@ -89,8 +89,7 @@
             "block",
             "warn",
             "nudge",
-            "allow",
-            "transform"
+            "allow"
           ],
           "description": "The decision effect when the rule fires ([OAR-DOC-8])."
         },
@@ -118,7 +117,7 @@
         "mandatory": {
           "type": "boolean",
           "default": false,
-          "description": "When true, the rule cannot be disabled by overlay, pack, or caller ([OAR-DOC-12])."
+          "description": "When true, the rule is enforced whenever selected and no host mechanism may disable it ([OAR-DOC-12], [OAR-OPS-5]). A mandatory rule cannot be monitored ([OAR-OPS-9])."
         },
         "on_error": {
           "description": "Behaviour when a fact provider or detector errors: fail_closed, fail_open, or a rule identifier to substitute ([OAR-DOC-13]).",
@@ -248,10 +247,34 @@
               ]
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "mandatory": {
+                "const": true
+              }
+            },
+            "required": [
+              "mandatory"
+            ]
+          },
+          "then": {
+            "not": {
+              "properties": {
+                "enforcement": {
+                  "const": "monitor"
+                }
+              },
+              "required": [
+                "enforcement"
+              ]
+            }
+          }
         }
       ],
       "patternProperties": {
-        "^x-": {
+        "^x-[a-z0-9]+(-[a-z0-9]+)*$": {
           "description": "Implementation extension. Ignored by other implementations ([OAR-DOC-19])."
         }
       },
@@ -267,8 +290,8 @@
       "properties": {
         "spec_version": {
           "type": "string",
-          "pattern": "^[0-9]+\\.[0-9]+$",
-          "description": "OAR spec version this document targets ([OAR-DOC-3])."
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "description": "OAR spec version this document targets. An engine implementing M.n accepts major M at minor n or below, and rejects any other ([OAR-DOC-3])."
         },
         "id": {
           "type": "string",
@@ -303,27 +326,45 @@
         },
         "what": {
           "type": "string",
-          "description": "Static presentation copy: what happened ([OAR-HINT-3])."
+          "description": "Static presentation copy: what happened ([OAR-HINT-3]).",
+          "not": {
+            "pattern": "\\{\\{|\\{%"
+          }
         },
         "cause": {
           "type": "string",
-          "description": "Static presentation copy: what caused it ([OAR-HINT-3])."
+          "description": "Static presentation copy: what caused it ([OAR-HINT-3]).",
+          "not": {
+            "pattern": "\\{\\{|\\{%"
+          }
         },
         "why": {
           "type": "string",
-          "description": "Static presentation copy: why it matters ([OAR-HINT-3])."
+          "description": "Static presentation copy: why it matters ([OAR-HINT-3]).",
+          "not": {
+            "pattern": "\\{\\{|\\{%"
+          }
         },
         "fix": {
           "type": "string",
-          "description": "Static presentation copy: how to fix it ([OAR-HINT-3])."
+          "description": "Static presentation copy: how to fix it ([OAR-HINT-3]).",
+          "not": {
+            "pattern": "\\{\\{|\\{%"
+          }
         },
         "instead": {
           "type": "string",
-          "description": "Static presentation copy: what to do instead ([OAR-HINT-3])."
+          "description": "Static presentation copy: what to do instead ([OAR-HINT-3]).",
+          "not": {
+            "pattern": "\\{\\{|\\{%"
+          }
         },
         "message": {
           "type": "string",
-          "description": "Static presentation copy: the one-line message ([OAR-HINT-3])."
+          "description": "Static presentation copy: the one-line message ([OAR-HINT-3]).",
+          "not": {
+            "pattern": "\\{\\{|\\{%"
+          }
         }
       },
       "anyOf": [
@@ -359,7 +400,7 @@
         }
       ],
       "patternProperties": {
-        "^x-": {
+        "^x-[a-z0-9]+(-[a-z0-9]+)*$": {
           "description": "Implementation extension. Ignored by other implementations ([OAR-DOC-19])."
         }
       },

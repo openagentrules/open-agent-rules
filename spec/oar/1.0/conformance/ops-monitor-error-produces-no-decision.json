@@ -2,7 +2,7 @@
   "id": "ops-monitor-error-produces-no-decision",
   "title": "A monitored rule that cannot be evaluated produces no decision",
   "covers": [
-    "OAR-OPS-11"
+    "OAR-OPS-8"
   ],
   "rule": {
     "spec_version": "1.0",

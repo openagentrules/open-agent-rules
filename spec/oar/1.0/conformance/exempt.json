@@ -37,11 +37,6 @@
    "check": "packages/oar-ref/src/env.ts (withHostFacts collision rejection), packages/oar-ref/test/env.test.ts"
   },
   {
-   "clause_id": "OAR-FACT-20",
-   "reason": "A digest-stability requirement: `tool_args_fingerprint` MUST be stable across sessions for the same tool and arguments and differ otherwise. Stability is a property over many occurrences and sessions; a single-occurrence fixture can observe one value but cannot assert equality or inequality it has no second occurrence to compare against, and the fixture contract has no cross-fixture state.",
-   "check": "packages/oar-ref/src/env.ts (fingerprint observation), packages/oar-ref/test/env.test.ts"
-  },
-  {
    "clause_id": "OAR-FACT-21",
    "reason": "A within-occurrence consistency requirement: every rule at one occurrence observes the same value for the same fact. The engine assembles the fact map once per occurrence and passes the same map to every rule's evaluation, so the property holds by construction; a fixture would need two rules observing the same fact and disagreeing to violate it, which the frozen evaluation algorithm cannot express.",
    "check": "packages/oar-ref/src/decide.ts (facts assembled once per occurrence, shared by every rule)"
@@ -103,8 +98,8 @@
   },
   {
    "clause_id": "OAR-EVAL-11",
-   "reason": "Binds the host applying a returned decision, not the engine producing it. A fixture asserts the decision an engine returns; what the host then does with the action is outside the occurrence the fixture describes. The decision side of each effect is fixtured under [OAR-EVAL-4], [OAR-EVAL-10], and [OAR-OPS-8].",
-   "check": "spec/oar/1.0/conformance/eval-first-of-winning-effect-decides.json, spec/oar/1.0/conformance/effect-transform-decision-shape.json"
+   "reason": "Binds the host applying a returned decision, not the engine producing it. A fixture asserts the decision an engine returns; what the host then does with the action is outside the occurrence the fixture describes. The decision side of each effect is fixtured under [OAR-EVAL-4] and [OAR-EVAL-10].",
+   "check": "spec/oar/1.0/conformance/eval-first-of-winning-effect-decides.json, spec/oar/1.0/conformance/eval-precedence-block-wins.json"
   },
   {
    "clause_id": "OAR-EXPR-20",
