@@ -275,7 +275,7 @@ const text = (html) => html.replace(/<[^>]+>/g, '').trim();
 function contents(body) {
   const items = [...body.matchAll(HEADING)].map(([, tag, id, inner]) => {
     const label = text(inner);
-    // "5.1 Capability profiles" and "Appendix A — ..." carry their own numbering;
+    // "5.4 Standard profiles" and "Appendix A — ..." carry their own numbering;
     // it goes in its own column so the titles line up down the rail.
     const m = /^(\d+(?:\.\d+)*)\.?\s+(.*)$/.exec(label) ?? /^Appendix\s+([A-Z])\s*[—-]\s*(.*)$/.exec(label);
     return { tag, id, n: m ? m[1] : '', label: m ? m[2] : label };

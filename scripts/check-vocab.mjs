@@ -2,7 +2,7 @@
 // Gate: the vocabulary tables printed in the specification are the vocabulary.
 //
 // vocabulary.yaml is the machine-readable source of truth for the core facts,
-// the capability profiles, and the core anchors. The specification prints the
+// the standard profiles, and the core anchors. The specification prints the
 // same three vocabularies as markdown tables so a reader never has to open a
 // second file. Two copies of a normative list drift, and a drifting fact type
 // is a rule that loads on one engine and is rejected by the next — so this

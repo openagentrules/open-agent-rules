@@ -37,9 +37,9 @@ node scripts/check-clauses.mjs --write
 
 ## Versions
 
-`oar` is the format marker and the version. Its presence identifies a document as an OAR rule, and its value is `<major>.<minor>`.
+`spec_version` carries the version a document is written against, as `<major>.<minor>` (`[OAR-DOC-3]`).
 
-**Minor.** Additive only: a new optional field, a new enum member, a new capability profile, a new clause, or wording that does not change what a conforming engine does. A minor revision never removes or renames a field, never narrows an accepted value, and never changes the decision an existing valid document produces (`[OAR-DOC-26]`).
+**Minor.** Additive only: a new optional field, a new enum member, a new standard profile, a new clause, or wording that does not change what a conforming engine does. A minor revision never removes or renames a field, never narrows an accepted value, and never changes the decision an existing valid document produces (`[OAR-DOC-26]`).
 
 **Major.** Anything that breaks a valid document of the current major (`[OAR-DOC-27]`). An engine that does not support a major rejects the document and fails closed. It never coerces, downgrades, or guesses.
 
@@ -47,19 +47,19 @@ node scripts/check-clauses.mjs --write
 
 **Multi-engine validation.** To ensure interoperability and eliminate ambiguity early, features are validated against multiple implementations: the TypeScript reference runner in this repository, alongside co-developed Rust and Go implementations. When a formal standards working group is chartered, independent implementation evidence across multiple independent organizations will guide final ratification.
 
-**An engine rejects a greater minor** (`[OAR-DOC-5]`) and accepts every minor less than or equal to its own. This is deliberate and is argued in [`RATIONALE.md`](RATIONALE.md): a rule is a conjunction, so a field added in a later minor may narrow it, and an engine that ignores that field enforces a policy nobody wrote. The consequence for authors is `[OAR-VER-4]` — a pack targeting a mixed fleet is authored to the lowest minor in that fleet, and says so.
+**An engine rejects a version it does not support** (`[OAR-DOC-3]`, `[OAR-CONF-2]`). This is deliberate and is argued in [`RATIONALE.md`](RATIONALE.md): a rule is a conjunction, so a field added in a later minor may narrow it, and an engine that ignores that field enforces a policy nobody wrote. A pack targeting a mixed fleet is therefore authored to a version every engine in that fleet supports, and says so.
 
-**Adding a fact to an existing profile is breaking** (`[OAR-VER-5]`). A profile is provided whole or not at all, so an engine claiming `filesystem` at the older minor no longer provides all of `filesystem` once a fact is added to it. Such a change either bumps the major or introduces a new profile name. New profiles, by contrast, may be added in a minor: an engine that does not provide one simply does not claim it, and a rule requiring it is rejected at load with a message naming the missing profile.
+**Adding a fact to an existing profile is breaking.** A profile is provided whole or not at all (`[OAR-FACT-13]`), so an engine claiming `filesystem` at the older minor no longer provides all of `filesystem` once a fact is added to it. Such a change either bumps the major or introduces a new profile name. New profiles, by contrast, may be added in a minor: an engine that does not provide one simply does not claim it, and a rule naming one of its facts in `requires_facts` is rejected at load with a message naming the missing fact (`[OAR-DOC-23]`).
 
-## Capability profile lifecycle
+## Standard profile lifecycle
 
-A capability profile is a named bundle of facts and observation functions that an engine provides whole or not at all. The profile list is the part of this standard most likely to grow, and the part where growth is most expensive: a profile is a permanent obligation on every engine that claims it, and one added carelessly becomes a bundle nobody implements and no rule can portably use.
+A standard profile is a named bundle of facts and observation functions that an engine provides whole or not at all. The profile list is the part of this standard most likely to grow, and the part where growth is most expensive: a profile is a permanent obligation on every engine that claims it, and one added carelessly becomes a bundle nobody implements and no rule can portably use.
 
 **Profile design criteria.** A profile is a claim that a *shape of host* recurs across the agent ecosystem. Profiles should represent generalizable, recurring agent host capabilities rather than single-host idioms (which belong in the `host` tier under `<host>.<fact>`). Propose profiles by defining the facts, observation functions, and types in `vocabulary.yaml`, adding them to the specification tables, and supplying conformance fixtures.
 
-**Every fact in a profile obeys the fact rules.** It is an observation and not a verdict (`[OAR-FACT-5]`), it bakes in no threshold and composes no other fact in a policy-meaningful way (`[OAR-FACT-7]`), and it has one of the declared types (`[OAR-FACT-22]`). A proposed profile containing a fact that encodes a conclusion is rejected on that ground alone.
+**Every fact in a profile obeys the fact rules.** It is an observation and not a verdict (`[OAR-FACT-4]`), it bakes in no threshold and composes no other fact in a policy-meaningful way (`[OAR-FACT-5]`), and it has one of the declared types (`[OAR-FACT-16]`). A proposed profile containing a fact that encodes a conclusion is rejected on that ground alone.
 
-**A profile is provided whole or not at all** (`[OAR-FACT-16]`). An engine may not declare a subset of one, and may not declare a fact under a name belonging to a profile it does not claim (`[OAR-FACT-17]`). That is what makes `requires.profiles` a usable promise: a rule naming a profile knows exactly which names are available to its condition.
+**A profile is provided whole or not at all** (`[OAR-FACT-13]`). An engine may not declare a subset of one, and may not declare a fact under a name belonging to a profile it does not claim. That is what makes a claimed profile a usable promise: a rule written against it knows exactly which names are available to its condition.
 
 **Retiring one.** A profile is not removed in a minor. It is marked deprecated in the vocabulary and in the table, keeps working, and is removed only at a major.
 
@@ -90,17 +90,17 @@ which is exactly why a rule bound to one is not portable.
 ## Extensions
 
 Fields prefixed `x-` are reserved for implementations. Another implementation **ignores** them
-rather than rejecting the document (`[OAR-DOC-26]`), and an `x-` field never acquires normative
+rather than rejecting the document (`[OAR-DOC-20]`), and an `x-` field never acquires normative
 meaning without a specification change. It must not affect selection, evaluation, ordering,
 precedence, or the returned decision — an extension that changes a decision is a fork of the
 format wearing a prefix.
 
 Everything else the document model does not define is rejected, naming the field
-(`[OAR-DOC-27]`). The alternative is a typo that silently does nothing, which is how a rule
+(`[OAR-DOC-20]`). The alternative is a typo that silently does nothing, which is how a rule
 becomes a placebo.
 
 Host-specific observations are not `x-` fields. They live under a namespace the host owns,
-written `<host>.<fact>` (`[OAR-FACT-18]`). A rule that uses one is legal and is not portable,
+written `<host>.<fact>` (`[OAR-FACT-15]`). A rule that uses one is legal and is not portable,
 and the specification says so rather than pretending otherwise.
 
 ### The extension registry
@@ -123,7 +123,7 @@ what it carries, and a link to your own documentation.
 **Rule identifiers** are `SCREAMING_SNAKE`, match `^[A-Z][A-Z0-9_]*$`, and are stable for the
 life of the rule. Never reuse one with a different meaning. When rules are stored one per file
 the file should be named after the identifier, but no engine derives identity, ordering, or
-precedence from a path (`[OAR-DOC-28]`).
+precedence from a path (`[OAR-DOC-22]`, `[OAR-EVAL-1]`).
 
 **Publisher namespaces** are lowercase, dot-separated, reverse-DNS-ish — `acme.security`,
 `globex.policy` — one per publishing organisation. Identity is (`namespace`, `id`); the
@@ -132,7 +132,7 @@ rendered identifier stays the bare `id`.
 **Fact names** are `lower_snake_case`. A parameterized observation function that would shadow a
 plain fact takes a distinguishing suffix — `mcp_provider_configured` is the fact,
 `mcp_provider_configured_for` the function — because facts and functions share one namespace
-(`[OAR-FACT-2]`).
+(`[OAR-FACT-19]`).
 
 **Profile names** are lowercase, hyphenated where they need a second word: `tool`, `session`,
 `filesystem`, `content-safety`, `mcp`.
@@ -144,7 +144,7 @@ host that publishes them.
 collide.
 
 **Conformance fixtures** are `lower-kebab-case`, prefixed with the area they exercise (`sel-`,
-`eval-`, `ops-`), and the file stem equals the fixture's `id` (`[OAR-CONF-17]`).
+`eval-`, `ops-`), and the file stem equals the fixture's `id` (`[OAR-CONF-14]`).
 
 ## Who decides
 
@@ -165,7 +165,7 @@ permission, notification, or fee, and Painted Wolf LLC has published an irrevoca
 non-assertion covenant covering every implementation — see [`PATENTS.md`](PATENTS.md). There
 is no certification programme, no trademark licence to obtain, and no
 implementer agreement. "Conforming" means passing the published corpus and reporting which
-fixtures were skipped and why (`[OAR-CONF-24]`) — a claim an implementer makes and anyone can
+fixtures were skipped and why (`[OAR-CONF-16]`) — a claim an implementer makes and anyone can
 check, not one this project grants.
 
 ## What Painted Wolf LLC keeps, and what it does not
