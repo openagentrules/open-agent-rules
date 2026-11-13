@@ -26,7 +26,8 @@ Start with [`spec/oar/1.0/open-agent-rules.md`](spec/oar/1.0/open-agent-rules.md
 file. Sections 1 to 3 are the document model and how a rule is selected; sections 4 to 8 are
 what an engine does with it and what it may assume; section 9 is the hint channel, for
 presentation copy a host raises outside the guard pipeline; section 10.1 is the runner
-algorithm, numbered so a fixture can cite each step; section 5 is the condition language.
+algorithm, numbered so a fixture can cite each step; Appendix C is the condition language,
+with a grammar.
 
 Every requirement carries a stable identifier like `[OAR-EVAL-4]`. Quote it in an issue.
 

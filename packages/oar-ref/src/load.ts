@@ -5,6 +5,7 @@
 
 import { parse, type BinaryOp, type Node } from './parse.js';
 import {
+  BUILTINS,
   CORE_ANCHORS,
   type AnchorProfile,
   type CelType,
@@ -169,6 +170,13 @@ export function loadRule(doc: unknown, opts: LoadOptions): Rule {
   const enforcement = (d['enforcement'] ?? 'enforce') as 'enforce' | 'monitor';
   if (enforcement !== 'enforce' && enforcement !== 'monitor') {
     throw new RuleLoadError(`rule ${id} has enforcement ${JSON.stringify(enforcement)}`);
+  }
+  if (d['mandatory'] !== undefined && typeof d['mandatory'] !== 'boolean') {
+    throw new RuleLoadError(`rule ${id} has mandatory ${JSON.stringify(d['mandatory'])}, want a boolean`);
+  }
+  if (d['mandatory'] === true && enforcement === 'monitor') {
+    // [OAR-OPS-12] A rule cannot be both required and not enforced.
+    throw new RuleLoadError(`rule ${id} is mandatory and cannot have enforcement monitor`);
   }
   const stream = String(d['stream'] ?? 'buffered');
   if (stream === 'chunk') {
@@ -419,6 +427,7 @@ function asArray(v: unknown): unknown[] {
 // ---------------------------------------------------------------- type check
 
 const NUMERIC: readonly CelType[] = ['int', 'double'];
+const INT64_MAX = 2n ** 63n - 1n;
 
 /** Walk the AST against the declared environment, before any evaluation. */
 export function checkType(node: Node, env: Environment, ruleID: string): CelType {
@@ -427,18 +436,27 @@ export function checkType(node: Node, env: Environment, ruleID: string): CelType
   };
   switch (node.kind) {
     case 'bool': return 'bool';
-    case 'int': return 'int';
-    case 'double': return 'double';
+    case 'int':
+      // [OAR-EXPR-15] An int literal fits a signed 64-bit integer.
+      if (node.value > INT64_MAX) return fail(`int literal ${node.value} does not fit 64 bits [OAR-EXPR-15]`);
+      return 'int';
+    case 'double':
+      if (!Number.isFinite(node.value)) return fail('double literal is not finite [OAR-EXPR-15]');
+      return 'double';
     case 'string': return 'string';
-    case 'null': return 'string';
     case 'list': {
-      for (const item of node.items) checkType(item, env, ruleID);
+      // [OAR-EXPR-7] A list literal is a non-empty list<string>.
+      if (node.items.length === 0) return fail('empty list literal: its type cannot be inferred [OAR-EXPR-7]');
+      for (const item of node.items) {
+        const t = checkType(item, env, ruleID);
+        if (t !== 'string') return fail(`list literal member is ${t}, want string [OAR-EXPR-7]`);
+      }
       return 'list<string>';
     }
     case 'ident': {
       const decl = env.facts[node.name];
       if (!decl) {
-        return fail(`condition references ${JSON.stringify(node.name)}, which is not a declared fact`);
+        return fail(`condition references ${JSON.stringify(node.name)}, which is not a declared fact [OAR-EXPR-2]`);
       }
       return decl.type;
     }
@@ -451,42 +469,43 @@ export function checkType(node: Node, env: Environment, ruleID: string): CelType
       if (flat) return flat.type;
       const decl = env.facts[node.target];
       if (!decl) {
-        return fail(`condition references ${JSON.stringify(node.target)}, which is not a declared fact`);
+        return fail(`condition references ${JSON.stringify(node.target)}, which is not a declared fact [OAR-EXPR-2]`);
       }
       if (decl.type !== 'map<string, dyn>') {
-        return fail(`condition selects .${node.field} on ${node.target}, which is ${decl.type}, not a map<string, dyn>`);
+        return fail(`condition selects .${node.field} on ${node.target}, which is ${decl.type}, not a map<string, dyn> [OAR-EXPR-2]`);
       }
       return 'string';
     }
     case 'call': {
+      if (BUILTINS.has(node.name)) return checkBuiltin(node.name, node.args, env, ruleID, fail);
       const fn = env.functions[node.name];
       if (!fn) {
-        return fail(`condition calls ${JSON.stringify(node.name)}, which is not a declared observation function`);
+        return fail(`condition calls ${JSON.stringify(node.name)}, which is not a declared observation function [OAR-EXPR-16]`);
       }
       if (node.args.length !== 1) {
-        return fail(`observation function ${node.name} takes one argument, got ${node.args.length}`);
+        return fail(`observation function ${node.name} takes one argument, got ${node.args.length} [OAR-EXPR-16]`);
       }
       const argType = checkType(node.args[0]!, env, ruleID);
       if (argType !== fn.arg) {
-        return fail(`observation function ${node.name} takes ${fn.arg}, got ${argType}`);
+        return fail(`observation function ${node.name} takes ${fn.arg}, got ${argType} [OAR-EXPR-16]`);
       }
       return fn.returns;
     }
     case 'unary': {
       const t = checkType(node.operand, env, ruleID);
       if (node.op === '!') {
-        if (t !== 'bool') return fail(`! applied to ${t}`);
+        if (t !== 'bool') return fail(`! applied to ${t} [OAR-EXPR-8]`);
         return 'bool';
       }
-      if (!NUMERIC.includes(t)) return fail(`unary - applied to ${t}`);
+      if (!NUMERIC.includes(t)) return fail(`unary - applied to ${t} [OAR-EXPR-9]`);
       return t;
     }
     case 'ternary': {
       const c = checkType(node.cond, env, ruleID);
-      if (c !== 'bool') return fail(`ternary condition is ${c}, want bool`);
+      if (c !== 'bool') return fail(`ternary condition is ${c}, want bool [OAR-EXPR-8]`);
       const a = checkType(node.then, env, ruleID);
       const b = checkType(node.other, env, ruleID);
-      if (a !== b) return fail(`ternary arms are ${a} and ${b}`);
+      if (a !== b) return fail(`ternary arms are ${a} and ${b} [OAR-EXPR-8]`);
       return a;
     }
     case 'binary':
@@ -507,31 +526,60 @@ function checkBinary(
   switch (op) {
     case '&&':
     case '||':
-      if (left !== 'bool' || right !== 'bool') return fail(`${op} applied to ${left} and ${right}`);
+      if (left !== 'bool' || right !== 'bool') return fail(`${op} applied to ${left} and ${right} [OAR-EXPR-8]`);
       return 'bool';
     case 'in':
-      if (right !== 'list<string>' && right !== 'list<map<string, dyn>>') {
-        return fail(`in applied to ${right}, which is not a list`);
+      // [OAR-EXPR-12] membership in a list<string>, or key presence in a map.
+      if (left !== 'string' || (right !== 'list<string>' && right !== 'map<string, dyn>')) {
+        return fail(`in applied to ${left} and ${right} [OAR-EXPR-12]`);
       }
       return 'bool';
     case '==':
     case '!=':
-      if (left !== right) return fail(`${op} compares ${left} with ${right}`);
+      if (left !== right) return fail(`${op} compares ${left} with ${right} [OAR-EXPR-11]`);
+      if (!SCALAR.includes(left)) return fail(`${op} compares aggregate ${left} [OAR-EXPR-11]`);
       return 'bool';
     case '<': case '<=': case '>': case '>=':
       // int and double are distinct types and are not comparable without an
       // explicit conversion, which this subset does not provide.
-      if (left !== right) return fail(`${op} compares ${left} with ${right}`);
+      if (left !== right) return fail(`${op} compares ${left} with ${right} [OAR-EXPR-10]`);
       if (!NUMERIC.includes(left) && left !== 'string') {
-        return fail(`${op} applied to ${left}`);
+        return fail(`${op} applied to ${left} [OAR-EXPR-10]`);
       }
       return 'bool';
     case '+':
       if (left === 'string' && right === 'string') return 'string';
       if (left === right && NUMERIC.includes(left)) return left;
-      return fail(`+ applied to ${left} and ${right}`);
-    case '-': case '*': case '/': case '%':
+      return fail(`+ applied to ${left} and ${right} [OAR-EXPR-9]`);
+    case '%':
+      if (left === 'int' && right === 'int') return 'int';
+      return fail(`% applied to ${left} and ${right} [OAR-EXPR-9]`);
+    case '-': case '*': case '/':
       if (left === right && NUMERIC.includes(left)) return left;
-      return fail(`${op} applied to ${left} and ${right}`);
+      return fail(`${op} applied to ${left} and ${right} [OAR-EXPR-9]`);
   }
+}
+
+const SCALAR: readonly CelType[] = ['bool', 'int', 'double', 'string'];
+const SIZED: readonly CelType[] = ['string', 'list<string>', 'list<map<string, dyn>>', 'map<string, dyn>'];
+
+/** The four built-ins of [OAR-EXPR-17], checked against their signatures. */
+function checkBuiltin(
+  name: string,
+  args: readonly Node[],
+  env: Environment,
+  ruleID: string,
+  fail: (msg: string) => never,
+): CelType {
+  const types = args.map((a) => checkType(a, env, ruleID));
+  if (name === 'size') {
+    if (types.length !== 1 || !SIZED.includes(types[0]!)) {
+      return fail(`size takes one string, list, or map, got (${types.join(', ')}) [OAR-EXPR-16]`);
+    }
+    return 'int';
+  }
+  if (types.length !== 2 || types[0] !== 'string' || types[1] !== 'string') {
+    return fail(`${name} takes (string, string), got (${types.join(', ')}) [OAR-EXPR-16]`);
+  }
+  return 'bool';
 }

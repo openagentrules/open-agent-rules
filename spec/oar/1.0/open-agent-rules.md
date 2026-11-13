@@ -75,8 +75,9 @@ otherwise.
   evaluation, ordering, precedence, or the returned decision. Two rules differing only in
   `severity` MUST produce identical decisions.
 - **[OAR-DOC-8]** `effect` MUST be one of `block`, `warn`, `nudge`, `allow`, `transform`.
-- **[OAR-DOC-9]** `when` is an optional condition expression over the declared fact
-  environment (section 5). When absent, the rule's condition is satisfied.
+- **[OAR-DOC-9]** `when` is an optional condition, written in the language of Appendix C,
+  over the declared fact environment (section 5). When absent, the rule's condition is
+  satisfied.
 - **[OAR-DOC-10]** `flow` is an optional ordered list of step names. When present, the rule
   fires only if `flow` matches the recent activity window as described in
   `[OAR-FACT-10]`.
@@ -206,6 +207,17 @@ narrows a rule to a subset of the occurrences of that moment.
 - **[OAR-EVAL-9]** An engine MUST apply the `on_fire` side-effects of every rule that fired
   and was enforced, including rules whose effect lost precedence under `[OAR-EVAL-4]`.
   Side-effects of rules never reached because of a short-circuit MUST NOT be applied.
+- **[OAR-EVAL-10]** When more than one enforced rule fired with the effect that wins under
+  `[OAR-EVAL-4]`, the decision MUST carry the identifier and the copy of the first of them in
+  the order of `[OAR-EVAL-1]`. The others appear only on the applied-rules trace
+  (`[OAR-OPS-7]`).
+- **[OAR-EVAL-11]** A host applying a decision MUST give each effect this meaning: `block` —
+  the action at the occurrence does not proceed; `nudge` — the action proceeds, and the
+  decision's copy is delivered to the agent as guidance for its next step; `warn` — the action
+  proceeds, and the decision is surfaced as a caution without asking the agent to change
+  course; `transform` — the action proceeds with the replacement of `[OAR-OPS-8]`. `allow`
+  produces no decision (`[OAR-EVAL-5]`). `nudge` outranks `warn` because it asks the agent to
+  act.
 
 ---
 
@@ -237,8 +249,8 @@ narrows a rule to a subset of the occurrences of that moment.
   notably a detector-supplied fact — MUST be assembled lazily: an engine MUST NOT produce it
   unless a selected rule references it.
 - **[OAR-FACT-10]** `flow` matches when its steps appear, in order, as a subsequence of the
-  recent activity window. The subsequence need not be contiguous. An engine MUST publish the
-  size of that window as part of its profile.
+  recent activity window. The subsequence need not be contiguous. An engine MUST state the
+  size of that window, in steps, in its conformance report (`[OAR-CONF-16]`).
 
 ### 5.1 Fact tiers
 
@@ -270,6 +282,7 @@ Every conforming engine provides these.
 | `arg_validation_errors` | `list<string>` | Machine codes for argument checks that did not pass. Empty when the arguments validated. |
 | `tool_args_fingerprint` | `string` | A stable digest of the tool name and arguments, for identifying a repeat of the same call. |
 | `breaker_count` | `int` | How many times a circuit breaker has been incremented for this rule and session. |
+| `fire_count` | `int` | How many times `increment_counter` has been applied for this rule and session since its last `reset_counter`. |
 | `same_code_reject_run` | `int` | How many consecutive rejections carrying the same identifier this session has produced. |
 | `is_directory` | `bool` | True when a path argument resolved to a directory. |
 | `not_found` | `bool` | True when a path or artifact the call names does not exist. |
@@ -383,6 +396,13 @@ forbids a fact and a function sharing a name. The suffix keeps `mcp_server_confi
 - **[OAR-FIRE-5]** Counter facts observed while a condition is evaluated MUST reflect the
   state *before* any side-effect of the current anchor occurrence is applied, so that a
   rule's own increment cannot change the value its own condition just read.
+- **[OAR-FIRE-6]** `increment_counter` and `reset_counter` maintain the counter the core fact
+  `fire_count` reads; `increment_breaker` and `reset_breaker` maintain the one `breaker_count`
+  reads. Each is keyed as `[OAR-FIRE-4]` requires, so a rule reads and changes only its own
+  counters.
+- **[OAR-FIRE-7]** `publish_event` emits one event to the host's audit channel carrying the
+  rule identity (`[OAR-DOC-22]`), the anchor, and the rule's effect. It writes no fact, and an
+  engine MUST NOT let it affect the decision, the trace, or any counter.
 
 ---
 
@@ -402,9 +422,10 @@ forbids a fact and a function sharing a name. The suffix keeps `mcp_server_confi
   decision carrying that substituted identifier instead of the rule's own, and MUST NOT
   continue evaluating later rules at the occurrence. The substitution replaces the
   identifier only; the effect is `block`.
-- **[OAR-OPS-5]** A rule with `mandatory: true` MUST NOT be disabled, overridden, or removed
-  by an overlay, a pack, or a caller. An engine MUST reject a configuration that attempts
-  it.
+- **[OAR-OPS-5]** A rule with `mandatory: true` is evaluated and enforced whenever it is
+  selected. Any host mechanism that disables rules, changes their enforcement, or removes
+  them from a loaded rule set — an overlay, a pack replacement, a caller option — MUST refuse
+  to do so for a mandatory rule, naming the rule.
 - **[OAR-OPS-6]** Evaluation of content anchors is buffered by default. An engine MAY
   support `stream: chunk`; one that does not MUST reject a document requesting it rather
   than silently buffering.
@@ -414,6 +435,11 @@ forbids a fact and a function sharing a name. The suffix keeps `mcp_server_confi
 - **[OAR-OPS-8]** A rule with effect `transform` MUST produce a decision that identifies the
   content to be replaced and the replacement. An engine that does not implement content
   mutation MUST reject such a rule at load rather than treating it as a `block`.
+- **[OAR-OPS-11]** A rule whose `enforcement` is `monitor` and that cannot be evaluated MUST
+  be recorded as errored and MUST NOT produce a decision, whatever its `on_error`. Monitoring
+  never acts, including on its own failures; `on_error` governs only enforced rules.
+- **[OAR-OPS-12]** An engine MUST reject at load a document with `mandatory: true` and
+  `enforcement: monitor`, naming the rule. A rule cannot be both required and not enforced.
 
 ### 7.1 Content-safety surface
 
@@ -626,7 +652,7 @@ identified so a conformance fixture can cite it.
 
 | Version | Change |
 |---------|--------|
-| 1.0 | First published document model, selector, evaluation, facts, stateful effects, operational semantics, and conformance fixture shape; core anchors and the anchor profile map, fact tiers and host namespaces, `namespace`, `requires_facts`, `profile`, and the `x-` extension and closed unknown-field policies. Adds the hint channel (`kind: hint`, section 9) for host-raised copy keyed by code, copy bindings (Appendix B), and the fact-semantics clauses `[OAR-FACT-16]`–`[OAR-FACT-25]`; the `mcp` profile's parameterized functions take the `_for` suffix. |
+| 1.0 | First published document model, selector, evaluation, facts, stateful effects, operational semantics, and conformance fixture shape; core anchors and the anchor profile map, fact tiers and host namespaces, `namespace`, `requires_facts`, `profile`, and the `x-` extension and closed unknown-field policies. Adds the hint channel (`kind: hint`, section 9) for host-raised copy keyed by code, copy bindings (Appendix B), the condition language (Appendix C), and the fact-semantics clauses `[OAR-FACT-16]`–`[OAR-FACT-25]`; the `mcp` profile's parameterized functions take the `_for` suffix. |
 
 An earlier public draft of this version, posted at the same URL before publication, carried
 copy-only units as `enforcement: off` rules and used the field names `oar`, `anchor`,
@@ -656,8 +682,8 @@ ws          = { " " | "\t" | "\n" | "\r" } ;
 literal     = ? any run of code points that does not begin "{{" or "{%" ? ;
 ```
 
-- **[OAR-COPY-1]** After the decision is resolved, the engine MUST render each member of the
-  winning rule's `copy` by substituting the bindings of this appendix against the fact
+- **[OAR-COPY-1]** After the decision is resolved, the engine MUST render each copy member
+  (`[OAR-DOC-18]`) of the rule whose identifier the decision carries, substituting the bindings of this appendix against the fact
   environment of the occurrence. A decision of `none` carries no copy.
 - **[OAR-COPY-2]** A binding `{{ identifier }}` names a declared fact. An engine MUST reject
   at load a copy member whose bindings name an identifier that is not a declared fact, naming
@@ -698,3 +724,134 @@ literal     = ? any run of code points that does not begin "{{" or "{%" ? ;
   under `[OAR-FACT-23]` — the engine MUST omit the entire rendered copy object, retain the
   block and its rule identifiers, and MUST NOT coerce the failed observation or substitute
   its zero value. This presentation failure MUST NOT start another `on_error` evaluation.
+
+---
+
+## Appendix C — The condition language (normative)
+
+`when` is written in a small, frozen expression language. Its syntax is a subset of CEL's, so
+a host with a CEL implementation can evaluate it by declaring the fact environment and the
+built-ins of C.3 and refusing what the grammar below cannot derive. It is specified on its own
+so that a host without CEL can implement it completely, and so that two engines cannot
+disagree about what a condition means.
+
+The language is defined as much by what it leaves out: no macros, no comprehensions, no
+method calls, no indexing, no regular expressions, no time, no random source, and no null.
+Regular expressions are left out because their dialects differ across host languages, which
+would make one portable rule decide differently on two conforming engines.
+
+### C.1 Grammar
+
+```ebnf
+condition      = disjunction [ "?" condition ":" condition ] ;
+disjunction    = conjunction { "||" conjunction } ;
+conjunction    = relation { "&&" relation } ;
+relation       = addition [ relop addition ] ;
+relop          = "==" | "!=" | "<" | "<=" | ">" | ">=" | "in" ;
+addition       = multiplication { ( "+" | "-" ) multiplication } ;
+multiplication = unary { ( "*" | "/" | "%" ) unary } ;
+unary          = ( "!" | "-" ) unary | primary ;
+primary        = literal | call | reference | "(" condition ")" ;
+call           = name "(" [ condition { "," condition } ] ")" ;
+reference      = name [ "." name ] ;
+literal        = "true" | "false" | int | double | string | list ;
+list           = "[" condition { "," condition } "]" ;
+name           = ( letter | "_" ) { letter | digit | "_" } ;
+int            = digit { digit } ;
+double         = digit { digit } ( fraction [ exponent ] | exponent ) ;
+fraction       = "." digit { digit } ;
+exponent       = ( "e" | "E" ) [ "+" | "-" ] digit { digit } ;
+string         = '"' { dquote-char } '"' | "'" { squote-char } "'" ;
+dquote-char    = escape | ? any code point except '"', "\" ? ;
+squote-char    = escape | ? any code point except "'", "\" ? ;
+escape         = "\" ( "\" | '"' | "'" | "n" | "r" | "t" ) ;
+```
+
+- **[OAR-EXPR-1]** An engine MUST accept every condition this grammar derives, subject to
+  the type rules of C.2, and MUST reject at load every condition it does not derive, naming
+  the offending construct and its offset in the source. A load-time rejection under this
+  appendix MUST cite the identifier of the clause it applies, such as `[OAR-EXPR-9]`, so that
+  a diagnostic can be checked without matching its wording.
+- **[OAR-EXPR-2]** A `reference` with no dot names a declared fact. A `reference` `a.b`
+  names the `host`-tier fact `a.b` (`[OAR-FACT-15]`) when one is declared, and otherwise
+  selects the member `b` of the `map<string, dyn>` fact `a` (`[OAR-FACT-22]`). Anything else
+  MUST be rejected at load as an unknown identifier. An engine MUST NOT declare a `host`-tier
+  fact whose namespace is the name of another declared fact, so that a reference never has
+  two readings.
+- **[OAR-EXPR-3]** A string literal accepts only the escapes `\\`, `\"`, `\'`, `\n`, `\r`,
+  and `\t`. An engine MUST reject any other escape.
+- **[OAR-EXPR-4]** Precedence, tightest first: unary `!` and `-`; `*` `/` `%`; `+` `-`; the
+  relational operators; `&&`; `||`; the ternary. Binary operators of equal precedence
+  associate left and the ternary associates right. A `relation` holds at most one relational
+  operator, so `a < b < c` and `a == b == c` MUST be rejected rather than grouped.
+- **[OAR-EXPR-5]** `&&` and `||` MUST short-circuit: an engine MUST NOT evaluate the right
+  operand when the left decides the result, so a cheap guard can protect a sub-expression that
+  would raise.
+- **[OAR-EXPR-6]** `true`, `false`, and `in` are reserved words, and an engine MUST NOT
+  declare a fact or function under one of them. A name is lexed greedily, so `international`
+  is one name. Whitespace between tokens is insignificant. A comment is not part of the
+  language, and an engine MUST reject a condition containing one.
+
+### C.2 Types
+
+- **[OAR-EXPR-7]** The value types are those of `[OAR-FACT-16]`. There is no null: every
+  declared fact has a value at every occurrence (`[OAR-FACT-25]`), and `null` is an unknown
+  identifier. A list literal MUST have at least one member, and every member MUST be a
+  `string`; the literal is then a `list<string>`. An engine MUST reject any other list
+  literal at load.
+- **[OAR-EXPR-8]** `&&`, `||`, and `!` take and produce `bool`. A ternary's condition MUST be
+  `bool` and its two branches MUST have the same type, which is the ternary's type.
+- **[OAR-EXPR-9]** `+` `-` `*` `/` take two `int` or two `double` and produce that type; `%`
+  takes two `int`; `+` also takes two `string` and concatenates them. There is no implicit
+  conversion between `int` and `double`. Integer division truncates toward zero, so `-7 / 2`
+  is `-3` and `-7 % 2` is `-1`. An engine MUST reject any other operand pair at load.
+- **[OAR-EXPR-10]** `<` `<=` `>` `>=` take two `int`, two `double`, or two `string`, and
+  produce `bool`. Strings compare by Unicode code point. An engine MUST reject any other
+  operand pair at load, including an `int` against a `double`: write `0.5`, not `1 / 2`, and
+  `1.0`, not `1`, against a score.
+- **[OAR-EXPR-11]** `==` and `!=` take two operands of the same type, one of `bool`, `int`,
+  `double`, or `string`, and produce `bool`. An engine MUST reject a comparison of unrelated
+  types, or of lists or maps, at load rather than returning `false`: a type-confused
+  comparison is a policy that silently never fires. Test an aggregate with `size()` or `in`.
+- **[OAR-EXPR-12]** `in` takes a `string` on the left and either a `list<string>`, testing
+  membership, or a `map<string, dyn>`, testing key presence, on the right, and produces
+  `bool`. An engine MUST reject any other operand pair at load.
+- **[OAR-EXPR-13]** A member selected from a `map<string, dyn>` (`[OAR-EXPR-2]`) has type
+  `string`. A member that is absent reads as the empty string. A member that is present and is
+  not a string MUST raise when evaluated, and the rule is then handled per its `on_error`.
+- **[OAR-EXPR-14]** Integer division or modulo by zero, integer arithmetic that overflows 64
+  bits, and `double` arithmetic whose result is not finite MUST raise, and the rule is then
+  handled per its `on_error`. An engine MUST NOT wrap an integer or produce an infinity or NaN.
+- **[OAR-EXPR-15]** An `int` literal MUST fit in a signed 64-bit integer and a `double`
+  literal MUST have a finite nearest binary64 value. An engine MUST reject any other literal
+  at load.
+
+### C.3 Calls and built-in functions
+
+- **[OAR-EXPR-16]** A `call` names a built-in of the table below or a declared observation
+  function (`[OAR-FACT-7]`). Its arguments MUST match the declared signature in number and
+  type, and an engine MUST reject any other call at load, naming the function.
+- **[OAR-EXPR-17]** The language defines exactly these four built-ins. An engine MUST NOT
+  define another, and MUST NOT declare a fact or an observation function under one of their
+  names. An observation an engine wants to offer is an observation function, subject to the
+  tier rules of section 5.
+
+  | Built-in | Signature | Meaning |
+  |----------|-----------|---------|
+  | `size(x)` | `(string \| list<string> \| list<map<string, dyn>> \| map<string, dyn>) -> int` | The number of members, or for a `string` the number of Unicode code points. |
+  | `starts_with(s, prefix)` | `(string, string) -> bool` | True when `s` begins with `prefix`. |
+  | `ends_with(s, suffix)` | `(string, string) -> bool` | True when `s` ends with `suffix`. |
+  | `contains(s, substring)` | `(string, string) -> bool` | True when `substring` occurs in `s`. |
+
+- **[OAR-EXPR-18]** The string built-ins compare by Unicode code point, with no
+  normalisation, no case folding, and no locale. An empty `prefix`, `suffix`, or `substring`
+  matches every string.
+
+### C.4 Limits
+
+- **[OAR-EXPR-19]** An engine MUST accept a condition of at least 256 nodes. It MAY reject a
+  larger one, and MUST then state its limit in its conformance report (`[OAR-CONF-16]`). A
+  node is one literal, reference, call, unary, binary, or ternary operation; a list literal is
+  one node plus one per member, and parentheses are not nodes.
+- **[OAR-EXPR-20]** Evaluation MUST terminate. The language has no loop, no recursion, and no
+  user-defined function, so an implementation of this grammar satisfies this by construction.

@@ -3,6 +3,14 @@
 // raises UnsupportedCelConstruct naming the construct and its offset, so a rule
 // that would be mis-evaluated is refused instead.
 
+// The clause each rejection applies ([OAR-EXPR-1]); anything else is outside
+// the grammar itself.
+const CLAUSE_FOR: Readonly<Record<string, string>> = {
+  comment: 'OAR-EXPR-6',
+  'string escape': 'OAR-EXPR-3',
+  'chained relational operator': 'OAR-EXPR-4',
+};
+
 export class UnsupportedCelConstruct extends Error {
   constructor(
     readonly construct: string,
@@ -11,7 +19,8 @@ export class UnsupportedCelConstruct extends Error {
   ) {
     super(
       `unsupported construct ${construct} at offset ${offset}` +
-        (detail ? `: ${detail}` : ''),
+        (detail ? `: ${detail}` : '') +
+        ` [${CLAUSE_FOR[construct] ?? 'OAR-EXPR-1'}]`,
     );
     this.name = 'UnsupportedCelConstruct';
   }
@@ -19,14 +28,13 @@ export class UnsupportedCelConstruct extends Error {
 
 export class CelSyntaxError extends Error {
   constructor(message: string, readonly offset: number) {
-    super(`${message} at offset ${offset}`);
+    super(`${message} at offset ${offset} [OAR-EXPR-1]`);
     this.name = 'CelSyntaxError';
   }
 }
 
 export type Node =
   | { kind: 'bool'; value: boolean; offset: number }
-  | { kind: 'null'; offset: number }
   | { kind: 'int'; value: bigint; offset: number }
   | { kind: 'double'; value: number; offset: number }
   | { kind: 'string'; value: string; offset: number }
@@ -145,6 +153,7 @@ function tokenize(src: string): Token[] {
 
 // Binding powers, loosest to tightest. The ternary is handled separately
 // because it is right-associative and three-armed.
+const RELATIONAL = 3;
 const BINDING: Record<string, number> = {
   '||': 1,
   '&&': 2,
@@ -202,6 +211,7 @@ class Parser {
 
   private binary(minBp: number): Node {
     let left = this.unary();
+    let relational = false;
     for (;;) {
       const t = this.peek();
       let op: string | undefined;
@@ -210,6 +220,11 @@ class Parser {
       if (op === undefined) break;
       const bp = BINDING[op]!;
       if (bp < minBp) break;
+      // [OAR-EXPR-4] A relation holds at most one relational operator.
+      if (bp === RELATIONAL) {
+        if (relational) throw new UnsupportedCelConstruct('chained relational operator', t.at);
+        relational = true;
+      }
       const at = this.next().at;
       const right = this.binary(bp + 1);
       left = { kind: 'binary', op: op as BinaryOp, left, right, offset: at };
@@ -264,9 +279,6 @@ class Parser {
       if (t.name === 'true' || t.name === 'false') {
         return this.noIndex({ kind: 'bool', value: t.name === 'true', offset: t.at });
       }
-      if (t.name === 'null') {
-        return this.noIndex({ kind: 'null', offset: t.at });
-      }
       if (this.atPunct('(')) {
         if (MACROS.has(t.name)) {
           throw new UnsupportedCelConstruct(`macro ${t.name}`, t.at);
@@ -275,7 +287,7 @@ class Parser {
         const args: Node[] = [];
         if (!this.atPunct(')')) {
           for (;;) {
-            args.push(this.callArgument());
+            args.push(this.expression());
             if (this.atPunct(',')) {
               this.next();
               continue;
@@ -303,35 +315,6 @@ class Parser {
       return this.noIndex({ kind: 'ident', name: t.name, offset: t.at });
     }
     throw new CelSyntaxError('expected an expression', t.at);
-  }
-
-  // Function arguments are literals or identifiers only; a nested call would
-  // widen the evaluated surface past what this implementation declares.
-  private callArgument(): Node {
-    const t = this.peek();
-    if (t.t === 'str') {
-      this.next();
-      return { kind: 'string', value: t.value, offset: t.at };
-    }
-    if (t.t === 'num') {
-      this.next();
-      return t.int
-        ? { kind: 'int', value: BigInt(t.text), offset: t.at }
-        : { kind: 'double', value: Number(t.text), offset: t.at };
-    }
-    if (t.t === 'ident') {
-      if (t.name === 'true' || t.name === 'false') {
-        this.next();
-        return { kind: 'bool', value: t.name === 'true', offset: t.at };
-      }
-      const after = this.toks[this.pos + 1];
-      if (after && after.t === 'punct' && after.text === '(') {
-        throw new UnsupportedCelConstruct('nested call argument', t.at);
-      }
-      this.next();
-      return { kind: 'ident', name: t.name, offset: t.at };
-    }
-    throw new UnsupportedCelConstruct('non-literal call argument', t.at);
   }
 
   // Indexing is outside the grammar wherever it appears, and so is any

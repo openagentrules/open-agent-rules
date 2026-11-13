@@ -115,6 +115,16 @@
    "clause_id": "OAR-DOC-28",
    "reason": "A publication-policy clause: a published version is immutable and corrections ship as new versions. It binds the specification's own release process; there is no engine behaviour to fixture, and the version gate plus the change log are the mechanisms that keep published versions distinct.",
    "check": "spec/oar/1.0/open-agent-rules.md (Appendix A), packages/oar-ref/src/load.ts (version gate)"
+  },
+  {
+   "clause_id": "OAR-EVAL-11",
+   "reason": "Binds the host applying a returned decision, not the engine producing it. A fixture asserts the decision an engine returns; what the host then does with the action is outside the occurrence the fixture describes. The decision side of each effect is fixtured under [OAR-EVAL-4], [OAR-EVAL-10], and [OAR-OPS-8].",
+   "check": "spec/oar/1.0/conformance/eval-first-of-winning-effect-decides.json, spec/oar/1.0/conformance/effect-transform-decision-shape.json"
+  },
+  {
+   "clause_id": "OAR-EXPR-20",
+   "reason": "Termination is structural: the grammar of Appendix C has no loop, no recursion, and no user-defined function, so every derivable condition evaluates in time bounded by its size. A fixture can only show that a given condition terminates, which every fixture already does.",
+   "check": "spec/oar/1.0/open-agent-rules.md Appendix C.1, packages/oar-ref/src/parse.ts"
   }
  ],
  "partial": []

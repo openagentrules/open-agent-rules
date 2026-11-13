@@ -28,7 +28,6 @@ export function evaluate(node: Node, ctx: EvalContext): Value {
     case 'int': return node.value;
     case 'double': return node.value;
     case 'string': return node.value;
-    case 'null': return null;
     case 'list': return node.items.map((item) => evaluate(item, ctx));
     case 'ident': return factValue(node.name, ctx);
     case 'select': {
@@ -49,20 +48,25 @@ export function evaluate(node: Node, ctx: EvalContext): Value {
       if (typeof target !== 'object' || target === null || Array.isArray(target)) {
         throw new EvalError(`${node.target} is not a map<string, dyn>`);
       }
-      // An absent field reads as the zero value of a string-typed selection,
-      // matching how an absent observation reads elsewhere.
+      // [OAR-EXPR-13] A selected member is a string. An absent member reads as
+      // the empty string; a present non-string member raises.
       const v = (target as Record<string, unknown>)[node.field];
-      return v === undefined ? '' : (v as Value);
+      if (v === undefined || v === null) return '';
+      if (typeof v !== 'string') throw new EvalError(`${node.target}.${node.field} is not a string`);
+      return v;
     }
     case 'call': {
+      const args = node.args.map((a) => evaluate(a, ctx));
+      const builtin = BUILTIN_IMPLS[node.name];
+      if (builtin) return builtin(args);
       const fn = ctx.functions[node.name];
       if (!fn) throw new EvalError(`observation function ${node.name} is not bound`);
-      return fn(evaluate(node.args[0]!, ctx));
+      return fn(args[0]!);
     }
     case 'unary': {
       const v = evaluate(node.operand, ctx);
       if (node.op === '!') return !asBool(v);
-      if (typeof v === 'bigint') return -v;
+      if (typeof v === 'bigint') return checkInt(-v);
       if (typeof v === 'number') return -v;
       throw new EvalError('unary - applied to a non-number');
     }
@@ -90,8 +94,9 @@ function binary(node: Extract<Node, { kind: 'binary' }>, ctx: EvalContext): Valu
     case '==': return same(l, r);
     case '!=': return !same(l, r);
     case 'in': {
-      if (!Array.isArray(r)) throw new EvalError('in applied to a non-list');
-      return r.some((item) => same(item as Value, l));
+      if (Array.isArray(r)) return r.some((item) => same(item as Value, l));
+      if (typeof r === 'object' && r !== null) return Object.prototype.hasOwnProperty.call(r, l as string);
+      throw new EvalError('in applied to a non-collection');
     }
     case '<': return compare(l, r) < 0;
     case '<=': return compare(l, r) <= 0;
@@ -103,10 +108,10 @@ function binary(node: Extract<Node, { kind: 'binary' }>, ctx: EvalContext): Valu
     case '-': return arith(l, r, (a, b) => a - b, (a, b) => a - b);
     case '*': return arith(l, r, (a, b) => a * b, (a, b) => a * b);
     case '/':
-      if (typeof l === 'bigint' && r === 0n) throw new EvalError('division by zero');
+      if (r === 0n || r === 0) throw new EvalError('division by zero');
       return arith(l, r, (a, b) => a / b, (a, b) => a / b);
     case '%':
-      if (typeof l === 'bigint' && r === 0n) throw new EvalError('modulo by zero');
+      if (r === 0n) throw new EvalError('modulo by zero');
       return arith(l, r, (a, b) => a % b, (a, b) => a % b);
   }
 }
@@ -116,22 +121,61 @@ function arith(
   ints: (a: bigint, b: bigint) => bigint,
   doubles: (a: number, b: number) => number,
 ): Value {
-  if (typeof l === 'bigint' && typeof r === 'bigint') return ints(l, r);
-  if (typeof l === 'number' && typeof r === 'number') return doubles(l, r);
+  // [OAR-EXPR-14] No wrapping and no infinities: BigInt division already
+  // truncates toward zero, so only the range needs checking.
+  if (typeof l === 'bigint' && typeof r === 'bigint') return checkInt(ints(l, r));
+  if (typeof l === 'number' && typeof r === 'number') {
+    const v = doubles(l, r);
+    if (!Number.isFinite(v)) throw new EvalError('double arithmetic is not finite');
+    return v;
+  }
   throw new EvalError('arithmetic applied to non-numbers of the same type');
 }
+
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
+
+function checkInt(v: bigint): bigint {
+  if (v < INT64_MIN || v > INT64_MAX) throw new EvalError('integer overflow');
+  return v;
+}
+
+// Strings compare by Unicode code point ([OAR-EXPR-10]); JavaScript's own
+// comparison is by UTF-16 code unit, which orders astral characters differently.
+function compareCodePoints(a: string, b: string): number {
+  const x = [...a];
+  const y = [...b];
+  for (let i = 0; i < Math.min(x.length, y.length); i++) {
+    const d = x[i]!.codePointAt(0)! - y[i]!.codePointAt(0)!;
+    if (d !== 0) return d < 0 ? -1 : 1;
+  }
+  return x.length === y.length ? 0 : x.length < y.length ? -1 : 1;
+}
+
+// The built-ins of [OAR-EXPR-17]. The string ones compare code point sequences
+// with no normalisation and no case folding; on well-formed UTF-16 a code-unit
+// prefix, suffix, or substring match is the same as a code-point one.
+const BUILTIN_IMPLS: Readonly<Record<string, (args: Value[]) => Value>> = {
+  size: ([x]) => {
+    if (typeof x === 'string') return BigInt([...x].length);
+    if (Array.isArray(x)) return BigInt(x.length);
+    if (typeof x === 'object' && x !== null) return BigInt(Object.keys(x).length);
+    throw new EvalError('size applied to a non-collection');
+  },
+  starts_with: ([s, p]) => (s as string).startsWith(p as string),
+  ends_with: ([s, p]) => (s as string).endsWith(p as string),
+  contains: ([s, p]) => (s as string).includes(p as string),
+};
 
 function compare(l: Value, r: Value): number {
   if (typeof l === 'bigint' && typeof r === 'bigint') return l < r ? -1 : l > r ? 1 : 0;
   if (typeof l === 'number' && typeof r === 'number') return l < r ? -1 : l > r ? 1 : 0;
-  if (typeof l === 'string' && typeof r === 'string') return l < r ? -1 : l > r ? 1 : 0;
+  if (typeof l === 'string' && typeof r === 'string') return compareCodePoints(l, r);
   throw new EvalError('ordered comparison of values of different types');
 }
 
+// == and != apply to scalars only ([OAR-EXPR-11]); aggregates are refused at load.
 function same(l: Value, r: Value): boolean {
-  if (Array.isArray(l) && Array.isArray(r)) {
-    return l.length === r.length && l.every((v, i) => same(v as Value, r[i] as Value));
-  }
   return l === r;
 }
 

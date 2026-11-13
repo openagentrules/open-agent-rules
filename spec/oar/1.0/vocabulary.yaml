@@ -46,6 +46,11 @@ core:
       observation: >-
         How many times a circuit breaker has been incremented for this rule and
         session.
+    - name: fire_count
+      type: int
+      observation: >-
+        How many times increment_counter has been applied for this rule and
+        session since its last reset_counter.
     - name: same_code_reject_run
       type: int
       observation: >-
@@ -194,14 +199,15 @@ detectors:
       threshold.
 
 # The closed on_fire vocabulary ([OAR-FIRE-1]) and what each action does.
-# The fire counter an increment_counter/reset_counter pair maintains is exposed
-# to rules as an ordinary fact per [OAR-FIRE-3]; the core table names
-# breaker_count, which increment_breaker/reset_breaker maintain.
+# The counters on_fire maintains are exposed to rules as ordinary core facts
+# ([OAR-FIRE-3], [OAR-FIRE-6]): fire_count and breaker_count.
 on_fire:
   - action: increment_counter
-    effect: Adds one to the rule's fire counter.
+    writes: fire_count
+    effect: Adds one.
   - action: reset_counter
-    effect: Sets the rule's fire counter to zero.
+    writes: fire_count
+    effect: Sets the value to zero.
   - action: increment_breaker
     writes: breaker_count
     effect: Adds one.

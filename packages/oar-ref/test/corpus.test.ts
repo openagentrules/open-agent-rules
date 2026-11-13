@@ -112,7 +112,8 @@ test('constructs outside the declared subset are refused by name', () => {
     ['{"a": 1}', 'map literal'],
     ['tool.startsWith("r")', 'method call'],
     ['tool_args.a.b', 'chained field selection'],
-    ['path_outside_scope(path_outside_scope("read"))', 'nested call argument'],
+    ['a < b < c', 'chained relational operator'],
+    ['a == b == c', 'chained relational operator'],
   ];
   for (const [expr, want] of cases) {
     assert.throws(

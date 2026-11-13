@@ -40,6 +40,7 @@ export const CORE_FACTS: Readonly<Record<string, FactDecl>> = {
   is_directory: { type: 'bool', tier: 'core' },
   policy_denied: { type: 'bool', tier: 'core' },
   breaker_count: { type: 'int', tier: 'core' },
+  fire_count: { type: 'int', tier: 'core' },
   same_code_reject_run: { type: 'int', tier: 'core' },
 };
 
@@ -115,8 +116,14 @@ export function withHostFacts(
           'list<map<string, dyn>>)',
       );
     }
-    if (facts[name] !== undefined || env.functions[name] !== undefined) {
-      throw new Error(`host fact ${name} collides with a declared fact or function`);
+    if (facts[name] !== undefined || env.functions[name] !== undefined || RESERVED_NAMES.has(name)) {
+      throw new Error(`host fact ${name} collides with a declared fact, function, or reserved name`);
+    }
+    // [OAR-EXPR-2] A reference `a.b` must have one reading, so a host namespace
+    // cannot be the name of another declared fact.
+    const dot = name.indexOf('.');
+    if (dot !== -1 && facts[name.slice(0, dot)] !== undefined) {
+      throw new Error(`host fact ${name} uses namespace ${name.slice(0, dot)}, which is a declared fact`);
     }
     facts[name] = { type, tier: 'host' };
   }
@@ -134,6 +141,12 @@ function isCelType(s: string): s is CelType {
     s === 'list<map<string, dyn>>'
   );
 }
+
+/** Built-ins of the condition language ([OAR-EXPR-17]). */
+export const BUILTINS = new Set(['size', 'starts_with', 'ends_with', 'contains']);
+
+/** Names no fact or function may take ([OAR-EXPR-6], [OAR-EXPR-17]). */
+export const RESERVED_NAMES = new Set(['true', 'false', 'in', ...BUILTINS]);
 
 /** The eight core anchor ids, in specification order. */
 export const CORE_ANCHORS = [
