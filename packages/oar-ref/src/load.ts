@@ -313,13 +313,10 @@ export function loadRuleSet(ruleDocs: readonly unknown[], hintDocs: readonly unk
 /** Every fact and function name a condition references, for [OAR-DOC-22]. */
 function conditionIdents(node: Node, out: Set<string>, env: Environment): void {
   switch (node.kind) {
-    case 'ident': out.add(node.name); break;
-    case 'select': {
-      // A dotted host fact is one name; otherwise the target map is the reference.
-      const flat = `${node.target}.${node.field}`;
-      out.add(env.facts[flat] ? flat : node.target);
+    case 'ident':
+      // A declared name is the reference; otherwise the map a member is selected from.
+      out.add(env.facts[node.name] ? node.name : node.name.slice(0, node.name.lastIndexOf('.')));
       break;
-    }
     case 'list': for (const item of node.items) conditionIdents(item, out, env); break;
     case 'unary': conditionIdents(node.operand, out, env); break;
     case 'ternary':
@@ -506,25 +503,17 @@ export function checkType(node: Node, env: Environment, ruleID: string): CelType
       return 'list<string>';
     }
     case 'ident': {
+      // [OAR-EXPR-2] A declared name is a fact; otherwise the last name selects
+      // a member, typed string, of the map fact the rest names.
       const decl = env.facts[node.name];
-      if (!decl) {
+      if (decl) return decl.type;
+      const at = node.name.lastIndexOf('.');
+      const target = at > 0 ? env.facts[node.name.slice(0, at)] : undefined;
+      if (!target) {
         return fail(`condition references ${JSON.stringify(node.name)}, which is not a declared fact [OAR-EXPR-2]`);
       }
-      return decl.type;
-    }
-    case 'select': {
-      // A namespaced host fact (`<host>.<fact>`, [OAR-FACT-15]) is written in a
-      // condition with the same dotted spelling its declaration uses. When the
-      // environment declares the dotted name outright, the node reads that fact;
-      // otherwise the node selects into a `map<string, dyn>` ([OAR-FACT-22]).
-      const flat = env.facts[`${node.target}.${node.field}`];
-      if (flat) return flat.type;
-      const decl = env.facts[node.target];
-      if (!decl) {
-        return fail(`condition references ${JSON.stringify(node.target)}, which is not a declared fact [OAR-EXPR-2]`);
-      }
-      if (decl.type !== 'map<string, dyn>') {
-        return fail(`condition selects .${node.field} on ${node.target}, which is ${decl.type}, not a map<string, dyn> [OAR-EXPR-2]`);
+      if (target.type !== 'map<string, dyn>') {
+        return fail(`condition selects a member of ${node.name.slice(0, at)}, which is ${target.type}, not a map<string, dyn> [OAR-EXPR-2]`);
       }
       return 'string';
     }

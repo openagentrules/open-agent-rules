@@ -110,8 +110,8 @@ test('constructs outside the declared subset are refused by name', () => {
     ['[1, 2].all(x, x > 0)', 'macro all'],
     ['tool_args["path"]', 'index expression'],
     ['{"a": 1}', 'map literal'],
-    ['tool.startsWith("r")', 'method call'],
-    ['tool_args.a.b', 'chained field selection'],
+    ['f(x).y == "r"', 'member selection on a value'],
+    ['"a".b == "x"', 'member selection on a value'],
     ['a < b < c', 'chained relational operator'],
     ['a == b == c', 'chained relational operator'],
   ];

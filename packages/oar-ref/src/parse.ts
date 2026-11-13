@@ -40,7 +40,6 @@ export type Node =
   | { kind: 'string'; value: string; offset: number }
   | { kind: 'list'; items: Node[]; offset: number }
   | { kind: 'ident'; name: string; offset: number }
-  | { kind: 'select'; target: string; field: string; offset: number }
   | { kind: 'call'; name: string; args: Node[]; offset: number }
   | { kind: 'unary'; op: '!' | '-'; operand: Node; offset: number }
   | { kind: 'binary'; op: BinaryOp; left: Node; right: Node; offset: number }
@@ -279,6 +278,15 @@ class Parser {
       if (t.name === 'true' || t.name === 'false') {
         return this.noIndex({ kind: 'bool', value: t.name === 'true', offset: t.at });
       }
+      // reference = name { "." name }: a dotted reference is one name, resolved
+      // by the checker ([OAR-EXPR-2]).
+      let name = t.name;
+      while (this.atPunct('.')) {
+        this.next();
+        const part = this.next();
+        if (part.t !== 'ident') throw new CelSyntaxError('expected a name after "."', part.at);
+        name += `.${part.name}`;
+      }
       if (this.atPunct('(')) {
         if (MACROS.has(t.name)) {
           throw new UnsupportedCelConstruct(`macro ${t.name}`, t.at);
@@ -296,30 +304,16 @@ class Parser {
           }
         }
         this.expect(')');
-        return this.noIndex({ kind: 'call', name: t.name, args, offset: t.at });
+        return this.noIndex({ kind: 'call', name, args, offset: t.at });
       }
-      if (this.atPunct('.')) {
-        this.next();
-        const field = this.next();
-        if (field.t !== 'ident') {
-          throw new CelSyntaxError('expected a field name after "."', field.at);
-        }
-        if (this.atPunct('(')) {
-          throw new UnsupportedCelConstruct(`method call .${field.name}()`, field.at);
-        }
-        if (this.atPunct('.')) {
-          throw new UnsupportedCelConstruct('chained field selection', this.peek().at);
-        }
-        return this.noIndex({ kind: 'select', target: t.name, field: field.name, offset: t.at });
-      }
-      return this.noIndex({ kind: 'ident', name: t.name, offset: t.at });
+      return this.noIndex({ kind: 'ident', name, offset: t.at });
     }
     throw new CelSyntaxError('expected an expression', t.at);
   }
 
   // Indexing is outside the grammar wherever it appears, and so is any
-  // selection or call hanging off something that is not a bare identifier —
-  // that shape is a macro or a method call.
+  // selection or call hanging off something that is not a reference — that
+  // shape is a macro or a method call.
   private noIndex(node: Node): Node {
     if (this.atPunct('[')) {
       throw new UnsupportedCelConstruct('index expression', this.peek().at);
@@ -335,7 +329,7 @@ class Parser {
       if (after && after.t === 'punct' && after.text === '(') {
         throw new UnsupportedCelConstruct(`method call .${name}()`, at);
       }
-      throw new UnsupportedCelConstruct('chained field selection', at);
+      throw new UnsupportedCelConstruct('member selection on a value', at);
     }
     return node;
   }

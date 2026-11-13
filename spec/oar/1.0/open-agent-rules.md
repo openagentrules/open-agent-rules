@@ -778,8 +778,8 @@ addition       = multiplication { ( "+" | "-" ) multiplication } ;
 multiplication = unary { ( "*" | "/" | "%" ) unary } ;
 unary          = ( "!" | "-" ) unary | primary ;
 primary        = literal | call | reference | "(" condition ")" ;
-call           = name "(" [ condition { "," condition } ] ")" ;
-reference      = name [ "." name ] ;
+call           = reference "(" [ condition { "," condition } ] ")" ;
+reference      = name { "." name } ;
 literal        = "true" | "false" | int | double | string | list ;
 list           = "[" condition { "," condition } "]" ;
 name           = ( letter | "_" ) { letter | digit | "_" } ;
@@ -798,12 +798,12 @@ escape         = "\" ( "\" | '"' | "'" | "n" | "r" | "t" ) ;
   the offending construct and its offset in the source. A load-time rejection under this
   appendix MUST cite the identifier of the clause it applies, such as `[OAR-EXPR-9]`, so that
   a diagnostic can be checked without matching its wording.
-- **[OAR-EXPR-2]** A `reference` with no dot names a declared fact. A `reference` `a.b`
-  names the `host`-tier fact `a.b` (`[OAR-FACT-15]`) when one is declared, and otherwise
-  selects the member `b` of the `map<string, dyn>` fact `a` (`[OAR-FACT-22]`). Anything else
-  MUST be rejected at load as an unknown identifier. An engine MUST NOT declare a `host`-tier
-  fact whose namespace is the name of another declared fact, so that a reference never has
-  two readings.
+- **[OAR-EXPR-2]** A `reference` names the declared fact whose name it is, dots included,
+  so `paintedwolf.attempts` names a `host`-tier fact (`[OAR-FACT-15]`). Otherwise, when every
+  name but the last names a declared `map<string, dyn>` fact, the reference selects the member
+  the last name gives (`[OAR-FACT-22]`). Anything else MUST be rejected at load as an unknown
+  identifier. An engine MUST NOT declare a fact whose name is a declared `map<string, dyn>`
+  fact's name followed by a dot and a name, so that a reference never has two readings.
 - **[OAR-EXPR-3]** A string literal accepts only the escapes `\\`, `\"`, `\'`, `\n`, `\r`,
   and `\t`. An engine MUST reject any other escape.
 - **[OAR-EXPR-4]** Precedence, tightest first: unary `!` and `-`; `*` `/` `%`; `+` `-`; the
@@ -856,7 +856,7 @@ escape         = "\" ( "\" | '"' | "'" | "n" | "r" | "t" ) ;
 ### C.3 Calls and built-in functions
 
 - **[OAR-EXPR-16]** A `call` names a built-in of the table below or a declared observation
-  function (`[OAR-FACT-7]`). Its arguments MUST match the declared signature in number and
+  function (`[OAR-FACT-7]`), by its full name. Its arguments MUST match the declared signature in number and
   type, and an engine MUST reject any other call at load, naming the function.
 - **[OAR-EXPR-17]** The language defines exactly these four built-ins. An engine MUST NOT
   define another, and MUST NOT declare a fact or an observation function under one of their

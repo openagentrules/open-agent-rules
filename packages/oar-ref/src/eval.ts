@@ -29,30 +29,20 @@ export function evaluate(node: Node, ctx: EvalContext): Value {
     case 'double': return node.value;
     case 'string': return node.value;
     case 'list': return node.items.map((item) => evaluate(item, ctx));
-    case 'ident': return factValue(node.name, ctx);
-    case 'select': {
-      // A namespaced host fact is stored under its full dotted name; when the
-      // occurrence carries it, the node reads that fact rather than selecting
-      // into a map (see the matching case in load.ts). A declared flat fact
-      // reads through the same coercion and zero-value rules as an ident, so
-      // an int host fact compares as a bigint and an absent one reads as its
-      // zero value ([OAR-FACT-24], [OAR-FACT-25]).
-      const flat = `${node.target}.${node.field}`;
-      const flatDecl = ctx.env.facts[flat];
-      if (flatDecl !== undefined) {
-        const raw = ctx.facts[flat];
-        if (raw !== undefined && raw !== null) return coerce(raw as Value, flatDecl.type);
-        return zeroValue(flatDecl.type);
-      }
-      const target = factValue(node.target, ctx);
+    case 'ident': {
+      // [OAR-EXPR-2] A declared name is a fact; otherwise the last name selects
+      // a member of the map fact the rest names.
+      if (ctx.env.facts[node.name] !== undefined) return factValue(node.name, ctx);
+      const at = node.name.lastIndexOf('.');
+      const target = factValue(node.name.slice(0, at), ctx);
       if (typeof target !== 'object' || target === null || Array.isArray(target)) {
-        throw new EvalError(`${node.target} is not a map<string, dyn>`);
+        throw new EvalError(`${node.name.slice(0, at)} is not a map<string, dyn>`);
       }
       // [OAR-EXPR-13] A selected member is a string. An absent member reads as
       // the empty string; a present non-string member raises.
-      const v = (target as Record<string, unknown>)[node.field];
+      const v = (target as Record<string, unknown>)[node.name.slice(at + 1)];
       if (v === undefined || v === null) return '';
-      if (typeof v !== 'string') throw new EvalError(`${node.target}.${node.field} is not a string`);
+      if (typeof v !== 'string') throw new EvalError(`${node.name} is not a string`);
       return v;
     }
     case 'call': {

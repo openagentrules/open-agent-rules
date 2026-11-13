@@ -119,11 +119,14 @@ export function withHostFacts(
     if (facts[name] !== undefined || env.functions[name] !== undefined || RESERVED_NAMES.has(name)) {
       throw new Error(`host fact ${name} collides with a declared fact, function, or reserved name`);
     }
-    // [OAR-EXPR-2] A reference `a.b` must have one reading, so a host namespace
-    // cannot be the name of another declared fact.
-    const dot = name.indexOf('.');
-    if (dot !== -1 && facts[name.slice(0, dot)] !== undefined) {
-      throw new Error(`host fact ${name} uses namespace ${name.slice(0, dot)}, which is a declared fact`);
+    // [OAR-EXPR-2] A reference has one reading: no fact is named for a member
+    // of a declared map, and no map is declared under which a fact already sits.
+    const dot = name.lastIndexOf('.');
+    if (dot !== -1 && facts[name.slice(0, dot)]?.type === 'map<string, dyn>') {
+      throw new Error(`host fact ${name} names a member of the map ${name.slice(0, dot)}`);
+    }
+    if (type === 'map<string, dyn>' && Object.keys(facts).some((other) => other.startsWith(`${name}.`))) {
+      throw new Error(`host fact ${name} is a map, and a declared fact is named for one of its members`);
     }
     facts[name] = { type, tier: 'host' };
   }
