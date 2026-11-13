@@ -33,12 +33,8 @@ export const CORE_FACTS: Readonly<Record<string, FactDecl>> = {
   tool_args: { type: 'map<string, dyn>', tier: 'core' },
   tool_args_fingerprint: { type: 'string', tier: 'core' },
   arg_validation_errors: { type: 'list<string>', tier: 'core' },
-  profile: { type: 'string', tier: 'core' },
-  session_posture: { type: 'string', tier: 'core' },
-  path_denied: { type: 'bool', tier: 'core' },
   not_found: { type: 'bool', tier: 'core' },
   is_directory: { type: 'bool', tier: 'core' },
-  policy_denied: { type: 'bool', tier: 'core' },
   breaker_count: { type: 'int', tier: 'core' },
   fire_count: { type: 'int', tier: 'core' },
   same_code_reject_run: { type: 'int', tier: 'core' },
@@ -59,6 +55,9 @@ export const MCP_FACTS: Readonly<Record<string, FactDecl>> = {
   mcp_qualified_tool: { type: 'string', tier: 'standard', profile: 'mcp' },
   mcp_server_configured: { type: 'bool', tier: 'standard', profile: 'mcp' },
   mcp_server_enabled: { type: 'bool', tier: 'standard', profile: 'mcp' },
+  mcp_configured_servers: { type: 'list<string>', tier: 'standard', profile: 'mcp' },
+  mcp_enabled_servers: { type: 'list<string>', tier: 'standard', profile: 'mcp' },
+  mcp_result: { type: 'map<string, dyn>', tier: 'standard', profile: 'mcp' },
   mcp_call_ok: { type: 'bool', tier: 'standard', profile: 'mcp' },
   mcp_error_code: { type: 'string', tier: 'standard', profile: 'mcp' },
   mcp_schema_matched: { type: 'bool', tier: 'standard', profile: 'mcp' },
@@ -69,11 +68,7 @@ export const CORE_FUNCTIONS: Readonly<Record<string, FunctionDecl>> = {
 };
 
 export const MCP_FUNCTIONS: Readonly<Record<string, FunctionDecl>> = {
-  mcp_server_configured_for: { arg: 'string', returns: 'bool', tier: 'standard', profile: 'mcp' },
-  mcp_server_enabled_for: { arg: 'string', returns: 'bool', tier: 'standard', profile: 'mcp' },
-  mcp_has_field: { arg: 'string', returns: 'bool', tier: 'standard', profile: 'mcp' },
   mcp_field_bool: { arg: 'string', returns: 'bool', tier: 'standard', profile: 'mcp' },
-  mcp_field_string: { arg: 'string', returns: 'string', tier: 'standard', profile: 'mcp' },
   mcp_field_int: { arg: 'string', returns: 'int', tier: 'standard', profile: 'mcp' },
 };
 

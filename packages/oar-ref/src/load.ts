@@ -42,30 +42,15 @@ const ON_FIRE: readonly OnFireAction[] = [
 
 export interface Selector {
   tools?: string[];
-  tool?: string | null;
-  profiles?: string[];
-  surface?: string | null;
-  surfaces?: string[];
-  session_posture?: string[];
-  phase?: string | null;
-  workflow?: string | null;
-  principal?: string | string[];
-  ledger?: Record<string, unknown>;
 }
-
-const SELECTOR_CLAUSES = new Set([
-  'tools', 'tool', 'profiles', 'surface', 'surfaces',
-  'session_posture', 'phase', 'workflow', 'principal', 'ledger',
-]);
 
 // Every field the document model defines. Anything else that is not an x-
 // extension is rejected.
 const DOCUMENT_FIELDS = new Set([
   'spec_version', 'id', 'namespace', 'title', 'kind', 'severity', 'on', 'selector',
   'when', 'flow', 'effect', 'enforcement', 'mandatory', 'on_error', 'on_fire',
-  'stream', 'emit', 'references', 'detector', 'requires_facts', 'profile', 'tools',
-  'what', 'cause', 'why', 'fix', 'instead', 'message', 'category',
-  'context_schema', 'scenarios', 'evidence', 'code',
+  'stream', 'references', 'detector', 'requires_facts', 'profile',
+  'what', 'cause', 'why', 'fix', 'instead', 'message',
 ]);
 
 const NAMESPACE_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
@@ -126,9 +111,6 @@ export function loadRule(doc: unknown, opts: LoadOptions): Rule {
       throw new RuleLoadError(`rule carries undefined field ${JSON.stringify(key)}`);
     }
   }
-  if ('code' in d && specVersion !== '1.0') {
-    throw new RuleLoadError(`code is removed at spec_version ${specVersion} — use id`);
-  }
 
   const id = requireString(d, 'id');
   if (!ID_RE.test(id)) {
@@ -162,10 +144,6 @@ export function loadRule(doc: unknown, opts: LoadOptions): Rule {
     throw new RuleLoadError(`rule ${id} is missing selector`);
   }
   const selector = readSelector(id, d['selector']);
-  if (selector.tools === undefined && Array.isArray(d['tools'])) {
-    // The deprecated top-level filter is equivalent to selector.tools.
-    selector.tools = (d['tools'] as unknown[]).map(String);
-  }
 
   const enforcement = (d['enforcement'] ?? 'enforce') as 'enforce' | 'monitor';
   if (enforcement !== 'enforce' && enforcement !== 'monitor') {
@@ -289,7 +267,7 @@ function conditionIdents(node: Node, out: Set<string>): void {
 // The fields a hint document may carry: the document envelope, the presentation
 // fields, and the copy members. Everything evaluation-shaped is forbidden.
 const HINT_FIELDS = new Set([
-  'spec_version', 'id', 'namespace', 'title', 'kind', 'severity', 'emit',
+  'spec_version', 'id', 'namespace', 'title', 'kind', 'severity',
   'references', 'what', 'cause', 'why', 'fix', 'instead', 'message',
 ]);
 
@@ -297,7 +275,7 @@ const HINT_FIELDS = new Set([
 // error can distinguish "a hint must not evaluate" from "no such field".
 const HINT_EVALUATION_FIELDS = new Set([
   'on', 'selector', 'effect', 'when', 'flow', 'enforcement', 'mandatory',
-  'on_error', 'on_fire', 'stream', 'detector', 'requires_facts', 'tools', 'profile',
+  'on_error', 'on_fire', 'stream', 'detector', 'requires_facts', 'profile',
 ]);
 
 export interface Hint {
@@ -339,7 +317,7 @@ export function loadHint(doc: unknown): Hint {
         );
       }
       throw new RuleLoadError(
-        `hint carries field ${JSON.stringify(key)}, which this specification does not define ([OAR-DOC-20], [OAR-HINT-5])`,
+        `hint carries field ${JSON.stringify(key)}, which this specification does not define ([OAR-DOC-19], [OAR-HINT-5])`,
       );
     }
   }
@@ -402,10 +380,14 @@ function readSelector(id: string, raw: unknown): Selector {
   }
   const out: Selector = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!SELECTOR_CLAUSES.has(key)) {
+    // [OAR-SEL-7] tools is the only clause this version defines.
+    if (key !== 'tools') {
       throw new RuleLoadError(`rule ${id} selector carries undefined clause ${JSON.stringify(key)}`);
     }
-    (out as Record<string, unknown>)[key] = value;
+    if (!Array.isArray(value) || value.length === 0 || !value.every((v) => typeof v === 'string' && v !== '')) {
+      throw new RuleLoadError(`rule ${id} selector clause "tools" must be a non-empty list of tool names`);
+    }
+    out.tools = value as string[];
   }
   return out;
 }

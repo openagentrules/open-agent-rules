@@ -11,7 +11,6 @@
     {
       "spec_version": "1.0",
       "namespace": "example.security",
-      "emit": "example:pack",
       "id": "INJECTION_FLAGGED",
       "kind": "detector",
       "on": "model.output",
@@ -29,7 +28,6 @@
     {
       "spec_version": "1.0",
       "namespace": "example.security",
-      "emit": "example:pack",
       "id": "JAILBREAK_REFUSED",
       "kind": "detector",
       "on": "model.output",

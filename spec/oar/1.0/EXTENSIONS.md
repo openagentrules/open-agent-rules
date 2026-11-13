@@ -2,8 +2,8 @@
 
 Open Agent Rules reserves fields whose names match `^x-[a-z0-9]+(-[a-z0-9]+)*$` for
 implementations. An engine ignores an `x-` field it does not recognise, and an `x-` field
-never becomes normative without a specification change ([OAR-DOC-20]). Every other undefined
-field is rejected at load, naming the field ([OAR-DOC-20]), so `x-` is the only way to carry
+never becomes normative without a specification change ([OAR-DOC-19]). Every other undefined
+field is rejected at load, naming the field ([OAR-DOC-19]), so `x-` is the only way to carry
 something this specification does not define.
 
 This file records the extensions implementations have published.
@@ -57,7 +57,7 @@ the format.
   forked the format and given the fork a prefix. A rule using that engine's extension produces
   one decision there and a different one everywhere else, which is the failure this whole
   specification exists to prevent.
-- It **must not** become normative without a specification change ([OAR-DOC-20]). If an
+- It **must not** become normative without a specification change ([OAR-DOC-19]). If an
   extension turns out to be something every engine needs, the path is a proposal against the
   specification — see [`GOVERNANCE.md`](../GOVERNANCE.md) — not wider adoption of the prefix.
 - It is **not** the mechanism for host-specific observations. Those are facts, and they live

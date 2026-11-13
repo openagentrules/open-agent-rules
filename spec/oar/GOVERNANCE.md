@@ -39,17 +39,17 @@ node scripts/check-clauses.mjs --write
 
 `spec_version` carries the version a document is written against, as `<major>.<minor>` (`[OAR-DOC-3]`).
 
-**Minor.** Additive only: a new optional field, a new enum member, a new standard profile, a new clause, or wording that does not change what a conforming engine does. A minor revision never removes or renames a field, never narrows an accepted value, and never changes the decision an existing valid document produces (`[OAR-DOC-26]`).
+**Minor.** Additive only: a new optional field, a new enum member, a new standard profile, a new clause, or wording that does not change what a conforming engine does. A minor revision never removes or renames a field, never narrows an accepted value, and never changes the decision an existing valid document produces (`[OAR-DOC-24]`).
 
-**Major.** Anything that breaks a valid document of the current major (`[OAR-DOC-27]`). An engine that does not support a major rejects the document and fails closed. It never coerces, downgrades, or guesses.
+**Major.** Anything that breaks a valid document of the current major (`[OAR-DOC-25]`). An engine that does not support a major rejects the document and fails closed. It never coerces, downgrades, or guesses.
 
-**Published versions.** Once a version is officially published (recorded in `spec/published.json`), it is treated as immutable (`[OAR-DOC-28]`) so validator caches and URL references do not break. During pre-v1 working drafts, the specification remains under active development.
+**Published versions.** Once a version is officially published (recorded in `spec/published.json`), it is treated as immutable (`[OAR-DOC-26]`) so validator caches and URL references do not break. During pre-v1 working drafts, the specification remains under active development.
 
 **Multi-engine validation.** To ensure interoperability and eliminate ambiguity early, features are validated against multiple implementations: the TypeScript reference runner in this repository, alongside co-developed Rust and Go implementations. When a formal standards working group is chartered, independent implementation evidence across multiple independent organizations will guide final ratification.
 
 **An engine rejects a version it does not support** (`[OAR-DOC-3]`, `[OAR-CONF-2]`). This is deliberate and is argued in [`RATIONALE.md`](RATIONALE.md): a rule is a conjunction, so a field added in a later minor may narrow it, and an engine that ignores that field enforces a policy nobody wrote. A pack targeting a mixed fleet is therefore authored to a version every engine in that fleet supports, and says so.
 
-**Adding a fact to an existing profile is breaking.** A profile is provided whole or not at all (`[OAR-FACT-13]`), so an engine claiming `filesystem` at the older minor no longer provides all of `filesystem` once a fact is added to it. Such a change either bumps the major or introduces a new profile name. New profiles, by contrast, may be added in a minor: an engine that does not provide one simply does not claim it, and a rule naming one of its facts in `requires_facts` is rejected at load with a message naming the missing fact (`[OAR-DOC-23]`).
+**Adding a fact to an existing profile is breaking.** A profile is provided whole or not at all (`[OAR-FACT-13]`), so an engine claiming `mcp` at the older minor no longer provides all of `mcp` once a fact is added to it. Such a change either bumps the major or introduces a new profile name. New profiles, by contrast, may be added in a minor: an engine that does not provide one simply does not claim it, and a rule naming one of its facts in `requires_facts` is rejected at load with a message naming the missing fact (`[OAR-DOC-22]`).
 
 ## Standard profile lifecycle
 
@@ -90,13 +90,13 @@ which is exactly why a rule bound to one is not portable.
 ## Extensions
 
 Fields prefixed `x-` are reserved for implementations. Another implementation **ignores** them
-rather than rejecting the document (`[OAR-DOC-20]`), and an `x-` field never acquires normative
+rather than rejecting the document (`[OAR-DOC-19]`), and an `x-` field never acquires normative
 meaning without a specification change. It must not affect selection, evaluation, ordering,
 precedence, or the returned decision — an extension that changes a decision is a fork of the
 format wearing a prefix.
 
 Everything else the document model does not define is rejected, naming the field
-(`[OAR-DOC-20]`). The alternative is a typo that silently does nothing, which is how a rule
+(`[OAR-DOC-19]`). The alternative is a typo that silently does nothing, which is how a rule
 becomes a placebo.
 
 Host-specific observations are not `x-` fields. They live under a namespace the host owns,
@@ -123,19 +123,19 @@ what it carries, and a link to your own documentation.
 **Rule identifiers** are `SCREAMING_SNAKE`, match `^[A-Z][A-Z0-9_]*$`, and are stable for the
 life of the rule. Never reuse one with a different meaning. When rules are stored one per file
 the file should be named after the identifier, but no engine derives identity, ordering, or
-precedence from a path (`[OAR-DOC-22]`, `[OAR-EVAL-1]`).
+precedence from a path (`[OAR-DOC-21]`, `[OAR-EVAL-1]`).
 
 **Publisher namespaces** are lowercase, dot-separated, reverse-DNS-ish — `acme.security`,
 `globex.policy` — one per publishing organisation. Identity is (`namespace`, `id`); the
 rendered identifier stays the bare `id`.
 
 **Fact names** are `lower_snake_case`. A parameterized observation function that would shadow a
-plain fact takes a distinguishing suffix — `mcp_provider_configured` is the fact,
-`mcp_provider_configured_for` the function — because facts and functions share one namespace
+plain fact takes a distinguishing suffix — `server_enabled` is the fact, `server_enabled_for`
+the function — because facts and functions share one namespace
 (`[OAR-FACT-19]`).
 
-**Profile names** are lowercase, hyphenated where they need a second word: `tool`, `session`,
-`filesystem`, `content-safety`, `mcp`.
+**Profile names** are lowercase, hyphenated where they need a second word: `content-safety`,
+`mcp`.
 
 **Host fact namespaces** use the host's own short name as the prefix, and are reserved to the
 host that publishes them.

@@ -13,14 +13,13 @@
     "on": "tool.pre_invoke",
     "selector": {},
     "effect": "transform",
-    "emit": "rule:conformance",
-    "when": "policy_denied"
+    "when": "not_found"
   },
   "input": {
     "anchor": "tool.pre_invoke",
     "facts": {
       "tool": "read",
-      "policy_denied": true
+      "not_found": true
     }
   },
   "expected": {

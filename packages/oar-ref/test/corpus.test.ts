@@ -172,15 +172,15 @@ test('copy bindings render against the occurrence facts', () => {
   const env = referenceEnvironment();
   const parts = parseCopyTemplate(
     'R', 'what',
-    'tool {{tool}} {% if path_denied %}denied{% else %}allowed{% endif %} n={{ breaker_count }}',
+    'tool {{tool}} {% if not_found %}denied{% else %}allowed{% endif %} n={{ breaker_count }}',
     env,
   );
   assert.equal(
-    renderCopy(parts, { tool: 'shell', path_denied: true, breaker_count: 3n }, env),
+    renderCopy(parts, { tool: 'shell', not_found: true, breaker_count: 3n }, env),
     'tool shell denied n=3',
   );
   assert.equal(
-    renderCopy(parts, { tool: 'shell', path_denied: false, breaker_count: 0n }, env),
+    renderCopy(parts, { tool: 'shell', not_found: false, breaker_count: 0n }, env),
     'tool shell allowed n=0',
   );
   // [OAR-COPY-8] whitespace inside the delimiters is insignificant.

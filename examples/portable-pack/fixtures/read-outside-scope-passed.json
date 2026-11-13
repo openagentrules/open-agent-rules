@@ -7,7 +7,6 @@
   "rule": {
     "spec_version": "1.0",
     "namespace": "example.security",
-    "emit": "example:pack",
     "id": "READ_OUTSIDE_SCOPE",
     "kind": "policy",
     "on": "tool.pre_invoke",

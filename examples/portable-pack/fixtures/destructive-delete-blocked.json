@@ -9,7 +9,6 @@
     {
       "spec_version": "1.0",
       "namespace": "example.security",
-      "emit": "example:pack",
       "id": "DELETE_REFUSED",
       "kind": "policy",
       "on": "tool.pre_invoke",
@@ -24,7 +23,6 @@
     {
       "spec_version": "1.0",
       "namespace": "example.security",
-      "emit": "example:pack",
       "id": "DESTRUCTIVE_TOOL_WARN",
       "kind": "policy",
       "on": "tool.pre_invoke",

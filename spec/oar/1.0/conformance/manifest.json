@@ -23,7 +23,8 @@
       "title": "A host fact declared in requires_facts renders in copy",
       "covers": [
         "OAR-COPY-5",
-        "OAR-FACT-19"
+        "OAR-FACT-19",
+        "OAR-FACT-15"
       ]
     },
     {
@@ -81,7 +82,8 @@
       "title": "A fact at its zero value renders, it does not vanish",
       "covers": [
         "OAR-FACT-25",
-        "OAR-COPY-4"
+        "OAR-COPY-4",
+        "OAR-FACT-24"
       ]
     },
     {
@@ -123,7 +125,7 @@
       "file": "doc-extension-field-ignored.json",
       "title": "An x- extension field is ignored rather than rejected",
       "covers": [
-        "OAR-DOC-20"
+        "OAR-DOC-19"
       ]
     },
     {
@@ -132,14 +134,6 @@
       "title": "An id that does not match the identifier pattern is rejected at load",
       "covers": [
         "OAR-DOC-4"
-      ]
-    },
-    {
-      "id": "doc-legacy-tools-filter-honoured",
-      "file": "doc-legacy-tools-filter-honoured.json",
-      "title": "The deprecated top-level tools list still scopes a rule when selector.tools is absent",
-      "covers": [
-        "OAR-DOC-19"
       ]
     },
     {
@@ -155,8 +149,8 @@
       "file": "doc-namespace-identity.json",
       "title": "Two publishers may ship the same id under different namespaces; the decision still carries the bare id",
       "covers": [
+        "OAR-DOC-20",
         "OAR-DOC-21",
-        "OAR-DOC-22",
         "OAR-EVAL-7"
       ]
     },
@@ -165,7 +159,7 @@
       "file": "doc-profile-field-is-informational.json",
       "title": "The profile field records intent and derives no behaviour",
       "covers": [
-        "OAR-DOC-24"
+        "OAR-DOC-23"
       ]
     },
     {
@@ -189,7 +183,7 @@
       "file": "doc-unknown-field-rejected.json",
       "title": "A field the specification does not define is rejected, naming the key",
       "covers": [
-        "OAR-DOC-20",
+        "OAR-DOC-19",
         "OAR-CONF-1"
       ]
     },
@@ -583,6 +577,22 @@
       ]
     },
     {
+      "id": "fact-mcp-accessor-wrong-type-errors",
+      "file": "fact-mcp-accessor-wrong-type-errors.json",
+      "title": "A typed mcp accessor reading a member of another type is a fact-provider failure",
+      "covers": [
+        "OAR-FACT-23"
+      ]
+    },
+    {
+      "id": "fact-mcp-result-members-read-by-type",
+      "file": "fact-mcp-result-members-read-by-type.json",
+      "title": "The mcp profile reads result members by selection and typed accessors",
+      "covers": [
+        "OAR-FACT-13"
+      ]
+    },
+    {
       "id": "fact-non-boolean-condition-rejected",
       "file": "fact-non-boolean-condition-rejected.json",
       "title": "A condition that does not evaluate to a boolean is rejected at load",
@@ -655,7 +665,8 @@
       "file": "fire-counter-threshold-crossing.json",
       "title": "The threshold on an engine counter lives in the rule, not in the engine",
       "covers": [
-        "OAR-FIRE-3"
+        "OAR-FIRE-3",
+        "OAR-FIRE-4"
       ]
     },
     {
@@ -880,7 +891,8 @@
       "title": "A rule on a core anchor the host declares unsupported is rejected at load",
       "covers": [
         "OAR-PROF-3",
-        "OAR-CONF-19"
+        "OAR-CONF-19",
+        "OAR-PROF-2"
       ]
     },
     {
@@ -896,7 +908,7 @@
       "file": "prof-requires-facts-unmet-rejected.json",
       "title": "A rule requiring a fact the host does not provide is rejected at load, naming both",
       "covers": [
-        "OAR-DOC-23",
+        "OAR-DOC-22",
         "OAR-PROF-6",
         "OAR-CONF-4"
       ]
@@ -912,7 +924,7 @@
     {
       "id": "sel-clauses-and",
       "file": "sel-clauses-and.json",
-      "title": "Selector clauses are conjunctive: one non-matching clause deselects the rule",
+      "title": "A selector clause that does not match deselects the rule",
       "covers": [
         "OAR-SEL-2",
         "OAR-SEL-4",
@@ -949,7 +961,7 @@
     {
       "id": "sel-unmodelled-clause-does-not-match",
       "file": "sel-unmodelled-clause-does-not-match.json",
-      "title": "A selector clause naming a dimension the host does not model does not match",
+      "title": "A tools clause does not match at an anchor where no tool is invoked",
       "covers": [
         "OAR-SEL-6"
       ]

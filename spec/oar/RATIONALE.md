@@ -32,11 +32,11 @@ they are the parts an operator argues about, tunes, and audits. So they have to 
 reviewer can see and change them:
 
 ```yaml
-when: 'prompt_injection_score > 0.8 && session_posture != "internal"'
+when: 'prompt_injection_score > 0.8 && tool != "internal_search"'
 ```
 
 Everything about that line is reviewable. The detector produced a number; the *rule* decided
-that 0.8 is the bar and that internal sessions are exempt. Move the threshold into the
+that 0.8 is the bar and that the internal search tool is exempt. Move the threshold into the
 detector and the same policy becomes invisible.
 
 This is why the specification states observation-not-verdict as a requirement on fact
@@ -73,7 +73,7 @@ portability computable: a reader can tell from the document alone which engines 
 without consulting any of them. Clause references:
 [`[OAR-SEL-1]`](https://openagentrules.org/spec/1.0/#3-anchors-and-selection),
 [`[OAR-EVAL-4]`](https://openagentrules.org/spec/1.0/#4-evaluation),
-[`[OAR-DOC-23]`](https://openagentrules.org/spec/1.0/#2-1-optional-fields),
+[`[OAR-DOC-22]`](https://openagentrules.org/spec/1.0/#2-1-optional-fields),
 [`[OAR-OPS-2]`](https://openagentrules.org/spec/1.0/#7-operational-semantics).
 
 ## Why not Rego, or Cedar
@@ -164,7 +164,7 @@ namespace it owns so that two engines cannot collide on a bare name
 ([`[OAR-FACT-15]`]). Nothing is stubbed, because nothing has to be.
 
 The rule's side of the contract is `requires_facts`
-([`[OAR-DOC-23]`]): the rule names the facts it needs, and an engine that does not provide one
+([`[OAR-DOC-22]`]): the rule names the facts it needs, and an engine that does not provide one
 of them rejects the rule at load
 ([`[OAR-CONF-4]`](https://openagentrules.org/spec/1.0/#10-conformance)) rather than failing
 condition compilation or evaluating a default. A rule is *portable* — the word the format
@@ -327,7 +327,7 @@ site drop one rule out of a pack it does not otherwise maintain.
 ## Rejecting what it does not know
 
 An engine rejects a document carrying a field this specification does not define
-([`[OAR-DOC-20]`](https://openagentrules.org/spec/1.0/#2-1-optional-fields)), and rejects
+([`[OAR-DOC-19]`](https://openagentrules.org/spec/1.0/#2-1-optional-fields)), and rejects
 a document whose `spec_version` major it does not support before any other processing
 ([`[OAR-CONF-2]`](https://openagentrules.org/spec/1.0/#10-conformance)). This is the opposite
 of the usual advice, and the usual advice is usually right.
@@ -349,7 +349,7 @@ the engine's point of view nothing happened.
 
 Refusing to load is the only failure mode an operator can see. The cost is that one document
 cannot target a fleet running mixed minors, which
-[`[OAR-DOC-26]`](https://openagentrules.org/spec/1.0/#11-extensibility-and-versioning) bounds
+[`[OAR-DOC-24]`](https://openagentrules.org/spec/1.0/#11-extensibility-and-versioning) bounds
 by making every minor revision additive: a document written for an earlier minor of the same
 major remains valid. Extension fields that an engine must ignore are spelled `x-`, and
 nothing else gets that grace.

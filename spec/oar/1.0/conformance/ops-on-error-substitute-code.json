@@ -12,7 +12,6 @@
     "on": "tool.pre_invoke",
     "selector": {},
     "effect": "warn",
-    "emit": "rule:conformance",
     "when": "prompt_injection_score > 0.8",
     "on_error": "SAFETY_CHECK_UNAVAILABLE",
     "detector": {

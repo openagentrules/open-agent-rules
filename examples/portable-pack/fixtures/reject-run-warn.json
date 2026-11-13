@@ -9,7 +9,6 @@
     {
       "spec_version": "1.0",
       "namespace": "example.hygiene",
-      "emit": "example:pack",
       "id": "REJECT_RUN_BLOCK",
       "kind": "invariant",
       "on": "tool.pre_invoke",
@@ -24,7 +23,6 @@
     {
       "spec_version": "1.0",
       "namespace": "example.hygiene",
-      "emit": "example:pack",
       "id": "REJECT_RUN_WARN",
       "kind": "invariant",
       "on": "tool.pre_invoke",

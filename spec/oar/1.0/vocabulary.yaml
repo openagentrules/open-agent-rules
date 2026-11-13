@@ -25,12 +25,6 @@ core:
     - name: tool_args
       type: map<string, dyn>
       observation: The arguments the tool was called with, as a map.
-    - name: session_posture
-      type: string
-      observation: The session's declared posture.
-    - name: profile
-      type: string
-      observation: The permission profile in force for this call.
     - name: arg_validation_errors
       type: list<string>
       observation: >-
@@ -62,12 +56,6 @@ core:
     - name: not_found
       type: bool
       observation: True when a path or artifact the call names does not exist.
-    - name: path_denied
-      type: bool
-      observation: True when a path argument resolved to a location policy refuses.
-    - name: policy_denied
-      type: bool
-      observation: True when the host's own policy layer refused the call.
   functions:
     - name: path_outside_scope
       type: (string) -> bool
@@ -115,10 +103,16 @@ profiles:
         observation: The host-side name of the bridged tool.
       - name: mcp_server_configured
         type: bool
-        observation: True when the catalogue contains the given server id.
+        observation: True when the catalogue contains this call's server.
       - name: mcp_server_enabled
         type: bool
-        observation: True when the given server is configured and enabled.
+        observation: True when this call's server is configured and enabled.
+      - name: mcp_configured_servers
+        type: list<string>
+        observation: The id of every server in the catalogue.
+      - name: mcp_enabled_servers
+        type: list<string>
+        observation: The id of every configured server that is enabled.
       - name: mcp_call_ok
         type: bool
         observation: >-
@@ -134,26 +128,21 @@ profiles:
         observation: >-
           True when at least one declared result schema validated the call's
           result.
-      - name: mcp_server_configured_for
-        type: (string) -> bool
-        observation: True when the catalogue contains the given server id.
-      - name: mcp_server_enabled_for
-        type: (string) -> bool
-        observation: True when the given server is configured and enabled.
-      - name: mcp_has_field
-        type: (string) -> bool
-        observation: True when the projected result carries the given key.
+      - name: mcp_result
+        type: map<string, dyn>
+        observation: >-
+          The bridged call's result projected to a map. Empty before the call
+          and when the result is not an object.
       - name: mcp_field_bool
         type: (string) -> bool
         observation: >-
-          The projected boolean at the given key; false when absent or wrongly
-          typed.
-      - name: mcp_field_string
-        type: (string) -> string
-        observation: The projected string at the given key; empty when absent.
+          The boolean member of mcp_result at the given key; false when absent.
+          A present member of another type is a fact-provider failure.
       - name: mcp_field_int
         type: (string) -> int
-        observation: The projected integer at the given key; zero when absent.
+        observation: >-
+          The integer member of mcp_result at the given key; zero when absent. A
+          present member of another type is a fact-provider failure.
 
 anchors:
   - name: tool.pre_invoke

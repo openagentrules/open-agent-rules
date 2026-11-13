@@ -103,40 +103,24 @@ otherwise.
 
 Every field in this subsection is optional.
 
-- **[OAR-DOC-19]** `tools` is a deprecated top-level list of tool names retained from
-  earlier drafts of this specification. An engine MUST continue to accept it and MUST treat it as equivalent to
-  `selector.tools` when `selector.tools` is absent. New documents SHOULD use
-  `selector.tools`.
-- **[OAR-DOC-20]** A document MAY carry implementation extension fields whose names begin
+- **[OAR-DOC-19]** A document MAY carry implementation extension fields whose names begin
   with `x-`. An engine MUST ignore an `x-` field it does not recognise, and MUST reject a
   document carrying any other field this specification does not define. An `x-` field MUST
   NOT become normative without a specification change.
-- **[OAR-DOC-21]** `namespace` is an optional publisher scope matching
+- **[OAR-DOC-20]** `namespace` is an optional publisher scope matching
   `^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$`. It identifies the
   organisation publishing the rule.
-- **[OAR-DOC-22]** The identity of a rule is the pair (`namespace`, `id`). An absent
+- **[OAR-DOC-21]** The identity of a rule is the pair (`namespace`, `id`). An absent
   `namespace` means the loading host's own scope. Two documents sharing an `id` under
   different namespaces MUST NOT collide. The identifier an engine renders in its decision,
   and that downstream software branches on, remains the bare `id` — see `[OAR-EVAL-7]`.
-- **[OAR-DOC-23]** `requires_facts` is an optional list of fact names the rule needs. An
+- **[OAR-DOC-22]** `requires_facts` is an optional list of fact names the rule needs. An
   engine that does not provide one of them MUST reject the rule at load, naming both the
   rule and the fact, rather than failing condition compilation or evaluating a default
   value.
-- **[OAR-DOC-24]** `profile` is an optional informational string, one of `portable` or
+- **[OAR-DOC-23]** `profile` is an optional informational string, one of `portable` or
   `host`, recording the author's intent. An engine MUST NOT derive behaviour from it; the
   portability of a rule is determined by its anchor and its facts, not by this field.
-- **[OAR-DOC-25]** *(obsolete)* `code`, an alias of `id` carried by an earlier draft of this
-  specification, is not a field of this document model. A document carrying `code` is
-  rejected as carrying a field this specification does not define ([OAR-DOC-20]).
-- **[OAR-DOC-29]** `emit` is an optional provenance tag naming the pipeline stage or
-  component that produced the finding. It MUST NOT affect selection, evaluation, ordering,
-  or precedence, and an engine MUST NOT interpret its value.
-- **[OAR-DOC-30]** `category`, `context_schema`, `scenarios`, and `evidence` are optional
-  informational fields a publisher MAY attach to a rule: `category` a string tag,
-  `context_schema` an object, `scenarios` a list of objects, and `evidence` an object. An
-  engine MUST accept them and MUST NOT derive selection, evaluation, ordering, precedence,
-  or the returned decision from them. They exist so a document that carries host-side
-  guidance metadata remains loadable; their meaning is the publisher's, not the engine's.
 
 ### 2.2 Example (non-normative)
 
@@ -172,11 +156,13 @@ narrows a rule to a subset of the occurrences of that moment.
 - **[OAR-SEL-5]** Selector clauses match machine-observable state only. An engine MUST NOT
   match a selector clause against natural-language text, and MUST NOT infer a clause value
   from prose shape, keyword lists, or substring search.
-- **[OAR-SEL-6]** A selector clause naming a dimension the host does not model MUST NOT
-  match. The rule is therefore not selected; this is not a load error and not a runtime
-  error.
+- **[OAR-SEL-6]** A selector clause naming a dimension the anchor occurrence does not carry
+  — `tools` at an anchor where no tool is invoked — MUST NOT match. The rule is therefore not
+  selected; this is not a load error and not a runtime error.
 - **[OAR-SEL-7]** The selector vocabulary is closed and published as a schema. An engine
-  MUST reject a document carrying a selector clause the schema does not define.
+  MUST reject a document carrying a selector clause the schema does not define. This version
+  defines one clause, `tools`: a non-empty list of tool names, which matches when the core
+  fact `tool` is one of them.
 
 ---
 
@@ -277,8 +263,6 @@ Every conforming engine provides these.
 |------|------|-------------|
 | `tool` | `string` | The name of the tool being invoked at this anchor occurrence. |
 | `tool_args` | `map<string, dyn>` | The arguments the tool was called with, as a map. |
-| `session_posture` | `string` | The session's declared posture. |
-| `profile` | `string` | The permission profile in force for this call. |
 | `arg_validation_errors` | `list<string>` | Machine codes for argument checks that did not pass. Empty when the arguments validated. |
 | `tool_args_fingerprint` | `string` | A stable digest of the tool name and arguments, for identifying a repeat of the same call. |
 | `breaker_count` | `int` | How many times a circuit breaker has been incremented for this rule and session. |
@@ -286,8 +270,6 @@ Every conforming engine provides these.
 | `same_code_reject_run` | `int` | How many consecutive rejections carrying the same identifier this session has produced. |
 | `is_directory` | `bool` | True when a path argument resolved to a directory. |
 | `not_found` | `bool` | True when a path or artifact the call names does not exist. |
-| `path_denied` | `bool` | True when a path argument resolved to a location policy refuses. |
-| `policy_denied` | `bool` | True when the host's own policy layer refused the call. |
 <!-- /oar:table -->
 
 ### 5.3 Core observation functions
@@ -321,22 +303,20 @@ that profile.
 | `mcp_server_id` | `string` | The catalogue server id for this call, or empty when the call is not a bridged tool call. |
 | `mcp_tool_name` | `string` | The unqualified tool name on the bridged server. |
 | `mcp_qualified_tool` | `string` | The host-side name of the bridged tool. |
-| `mcp_server_configured` | `bool` | True when the catalogue contains the given server id. |
-| `mcp_server_enabled` | `bool` | True when the given server is configured and enabled. |
+| `mcp_server_configured` | `bool` | True when the catalogue contains this call's server. |
+| `mcp_server_enabled` | `bool` | True when this call's server is configured and enabled. |
+| `mcp_configured_servers` | `list<string>` | The id of every server in the catalogue. |
+| `mcp_enabled_servers` | `list<string>` | The id of every configured server that is enabled. |
 | `mcp_call_ok` | `bool` | True after a bridged call that returned without error. False before the call. |
 | `mcp_error_code` | `string` | The machine error code a failed bridged call reported, never free text. |
 | `mcp_schema_matched` | `bool` | True when at least one declared result schema validated the call's result. |
-| `mcp_server_configured_for` | `(string) -> bool` | True when the catalogue contains the given server id. |
-| `mcp_server_enabled_for` | `(string) -> bool` | True when the given server is configured and enabled. |
-| `mcp_has_field` | `(string) -> bool` | True when the projected result carries the given key. |
-| `mcp_field_bool` | `(string) -> bool` | The projected boolean at the given key; false when absent or wrongly typed. |
-| `mcp_field_string` | `(string) -> string` | The projected string at the given key; empty when absent. |
-| `mcp_field_int` | `(string) -> int` | The projected integer at the given key; zero when absent. |
+| `mcp_result` | `map<string, dyn>` | The bridged call's result projected to a map. Empty before the call and when the result is not an object. |
+| `mcp_field_bool` | `(string) -> bool` | The boolean member of mcp_result at the given key; false when absent. A present member of another type is a fact-provider failure. |
+| `mcp_field_int` | `(string) -> int` | The integer member of mcp_result at the given key; zero when absent. A present member of another type is a fact-provider failure. |
 <!-- /oar:table -->
 
-The `mcp` profile's parameterized forms carry the `_for` suffix because `[OAR-FACT-19]`
-forbids a fact and a function sharing a name. The suffix keeps `mcp_server_configured` and
-`mcp_server_configured_for` distinct in the condition language's single namespace.
+A string member of `mcp_result` is read by selection, `mcp_result.status`, and key presence
+by `in` (Appendix C); the two functions reach the members selection cannot type.
 
 ### 5.5 Fact semantics
 
@@ -401,7 +381,7 @@ forbids a fact and a function sharing a name. The suffix keeps `mcp_server_confi
   reads. Each is keyed as `[OAR-FIRE-4]` requires, so a rule reads and changes only its own
   counters.
 - **[OAR-FIRE-7]** `publish_event` emits one event to the host's audit channel carrying the
-  rule identity (`[OAR-DOC-22]`), the anchor, and the rule's effect. It writes no fact, and an
+  rule identity (`[OAR-DOC-21]`), the anchor, and the rule's effect. It writes no fact, and an
   engine MUST NOT let it affect the decision, the trace, or any counter.
 
 ---
@@ -524,7 +504,7 @@ presentation copy keyed by a code, and takes no part in evaluation at all.
 - **[OAR-HINT-1]** A document whose `kind` is `hint` is a hint document. It MUST contain
   `spec_version`, `id`, and `kind`, and MUST NOT contain `on`, `selector`, `effect`, `when`,
   `flow`, `enforcement`, `mandatory`, `on_error`, `on_fire`, `stream`, `detector`,
-  `requires_facts`, `tools`, or `profile`. An engine MUST load hint documents it finds in a
+  `requires_facts`, or `profile`. An engine MUST load hint documents it finds in a
   rule set and MUST NOT select or evaluate them.
 - **[OAR-HINT-2]** A hint document's `id` is the code the host raises. It follows the
   identifier grammar of `[OAR-DOC-4]`. A hint MUST carry at least one copy field
@@ -638,12 +618,12 @@ identified so a conformance fixture can cite it.
 
 ## 11. Extensibility and versioning
 
-- **[OAR-DOC-26]** A minor revision MUST be additive: it may add optional fields and enum
+- **[OAR-DOC-24]** A minor revision MUST be additive: it may add optional fields and enum
   members, and MUST NOT remove or rename a required field or change the decision an existing
   valid document produces.
-- **[OAR-DOC-27]** A change that breaks a valid document of the current major version MUST
+- **[OAR-DOC-25]** A change that breaks a valid document of the current major version MUST
   bump the major version.
-- **[OAR-DOC-28]** A published version of this specification is immutable. A correction MUST
+- **[OAR-DOC-26]** A published version of this specification is immutable. A correction MUST
   ship as a new version rather than an edit in place.
 
 ---
@@ -652,7 +632,7 @@ identified so a conformance fixture can cite it.
 
 | Version | Change |
 |---------|--------|
-| 1.0 | First published document model, selector, evaluation, facts, stateful effects, operational semantics, and conformance fixture shape; core anchors and the anchor profile map, fact tiers and host namespaces, `namespace`, `requires_facts`, `profile`, and the `x-` extension and closed unknown-field policies. Adds the hint channel (`kind: hint`, section 9) for host-raised copy keyed by code, copy bindings (Appendix B), the condition language (Appendix C), and the fact-semantics clauses `[OAR-FACT-16]`–`[OAR-FACT-25]`; the `mcp` profile's parameterized functions take the `_for` suffix. |
+| 1.0 | First published document model, selector, evaluation, facts, stateful effects, operational semantics, and conformance fixture shape; core anchors and the anchor profile map, fact tiers and host namespaces, `namespace`, `requires_facts`, `profile`, and the `x-` extension and closed unknown-field policies. Adds the hint channel (`kind: hint`, section 9) for host-raised copy keyed by code, copy bindings (Appendix B), the condition language (Appendix C), and the fact-semantics clauses `[OAR-FACT-16]`–`[OAR-FACT-25]` |
 
 An earlier public draft of this version, posted at the same URL before publication, carried
 copy-only units as `enforcement: off` rules and used the field names `oar`, `anchor`,
@@ -701,7 +681,7 @@ literal     = ? any run of code points that does not begin "{{" or "{%" ? ;
   `list<map<string, dyn>>` cannot be interpolated.
 - **[OAR-COPY-5]** A name appearing in a copy binding or conditional is a fact the rule
   references for `[OAR-FACT-9]` and `[OAR-PROF-5]`. A non-core fact named only in `copy` MUST
-  still be reached through `requires_facts` (`[OAR-DOC-23]`): copy is presentation, not an
+  still be reached through `requires_facts` (`[OAR-DOC-22]`): copy is presentation, not an
   exemption from the portability contract.
 - **[OAR-COPY-6]** Rendered copy MUST NOT affect selection, evaluation, ordering, precedence,
   or the returned effect. Two rules whose `copy` differs only in bindings or prose MUST

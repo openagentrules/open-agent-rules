@@ -1,7 +1,7 @@
 # A portable rule pack
 
 Seven rules, across five files, that exercise most of Open Agent Rules 1.0 and are portable in
-the sense [`[OAR-DOC-24]`](../../spec/oar/1.0/open-agent-rules.md) records and section 8
+the sense [`[OAR-DOC-23]`](../../spec/oar/1.0/open-agent-rules.md) records and section 8
 defines: every anchor is a core anchor, and every fact comes from the `core` tier or from a
 standard profile the rule names in `requires_facts`. They run unchanged on any engine
 providing those facts.
@@ -29,8 +29,8 @@ interchange form, and the mapping is lossless (`[OAR-DOC-1]`).
 - The `copy:` block is gone; `what`, `cause`, `why`, `fix`, `instead`, and `message` are
   fields of the rule itself (`[OAR-DOC-18]`, Appendix B).
 - `requires: profiles:` is gone. A rule names the *facts* it needs
-  (`[OAR-DOC-23]`), and `profile: portable` records the author's intent without carrying
-  behaviour (`[OAR-DOC-24]`).
+  (`[OAR-DOC-22]`), and `profile: portable` records the author's intent without carrying
+  behaviour (`[OAR-DOC-23]`).
 - `status` is gone; `enforcement` is `enforce` or `monitor` (`[OAR-DOC-11]`) — there is no
   third mode to publish copy under.
 - `overrides` is gone. The same outcome falls out of the deterministic order

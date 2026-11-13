@@ -4,7 +4,7 @@
 #
 # The facts a rule may name are declared by the engine's fact environment
 # (section 5), and a rule that needs a fact the host lacks names it in
-# `requires_facts` ([OAR-DOC-23]).
+# `requires_facts` ([OAR-DOC-22]).
 
 oar_profile_version: "1.0"
 core:

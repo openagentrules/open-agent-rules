@@ -2,13 +2,12 @@
   "id": "mcp-server-disabled-blocked",
   "title": "A call to a configured but disabled bridged server is blocked",
   "covers": [
-    "OAR-DOC-23",
+    "OAR-DOC-22",
     "OAR-FACT-13"
   ],
   "rule": {
     "spec_version": "1.0",
     "namespace": "example.security",
-    "emit": "example:pack",
     "id": "MCP_SERVER_DISABLED",
     "kind": "policy",
     "on": "tool.pre_invoke",

@@ -274,30 +274,6 @@ function selectorMatches(sel: Selector, facts: Readonly<Record<string, Value>>):
     const tool = str('tool');
     if (tool === undefined || !sel.tools.includes(tool)) return false;
   }
-  if (typeof sel.tool === 'string' && sel.tool !== '') {
-    if (str('tool') !== sel.tool) return false;
-  }
-  if (sel.profiles && sel.profiles.length > 0) {
-    const p = str('profile');
-    if (p === undefined || !sel.profiles.includes(p)) return false;
-  }
-  if (sel.session_posture && sel.session_posture.length > 0) {
-    const p = str('session_posture');
-    if (p === undefined || !sel.session_posture.includes(p)) return false;
-  }
-  if (sel.surfaces && sel.surfaces.length > 0) {
-    const s = str('surface');
-    if (s === undefined || !sel.surfaces.includes(s)) return false;
-  }
-  if (typeof sel.surface === 'string' && sel.surface !== '') {
-    if (str('surface') !== sel.surface) return false;
-  }
-  if (typeof sel.phase === 'string' && sel.phase !== '') {
-    if (str('phase') !== sel.phase) return false;
-  }
-  if (typeof sel.workflow === 'string' && sel.workflow !== '') {
-    if (str('workflow') !== sel.workflow) return false;
-  }
   return true;
 }
 
@@ -307,6 +283,11 @@ function observationFunctions(
   env: Environment,
 ): Record<string, (arg: Value) => Value> {
   const ctx: EvalContext = { facts, env, functions: {} };
+  const resultMember = (key: Value): unknown => {
+    const result = factValue('mcp_result', ctx) as Record<string, unknown>;
+    const v = result[String(key)];
+    return v === null ? undefined : v;
+  };
   return {
     path_outside_scope: (arg) => {
       const tool = facts['tool'];
@@ -314,11 +295,22 @@ function observationFunctions(
       const v = facts['path_outside_scope'];
       return v === true;
     },
-    mcp_server_configured_for: () => factValue('mcp_server_configured', ctx) === true,
-    mcp_server_enabled_for: () => factValue('mcp_server_enabled', ctx) === true,
-    mcp_has_field: () => false,
-    mcp_field_bool: () => false,
-    mcp_field_string: () => '',
-    mcp_field_int: () => 0n,
+    // A member of mcp_result read through a typed accessor: absent reads as the
+    // zero value, a member of another type is a fact-provider failure.
+    mcp_field_bool: (key) => {
+      const v = resultMember(key);
+      if (v === undefined) return false;
+      if (typeof v !== 'boolean') throw new EvalError(`mcp_result.${String(key)} is not a bool`);
+      return v;
+    },
+    mcp_field_int: (key) => {
+      const v = resultMember(key);
+      if (v === undefined) return 0n;
+      if (typeof v === 'bigint') return v;
+      if (typeof v !== 'number' || !Number.isInteger(v)) {
+        throw new EvalError(`mcp_result.${String(key)} is not an int`);
+      }
+      return BigInt(v);
+    },
   };
 }
