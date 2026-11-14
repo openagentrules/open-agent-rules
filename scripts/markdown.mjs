@@ -10,7 +10,7 @@
 // Heading anchors are stable and are part of the published contract: other
 // documents deep-link to `#3-anchors-and-selection`. The slug is the heading
 // text lowercased with every run of non-alphanumeric characters collapsed to a
-// hyphen, so "5.1 Capability profiles" is `#5-1-capability-profiles`.
+// hyphen, so "5.4 Standard profiles" is `#5-4-standard-profiles`.
 
 export const escapeHtml = (s) =>
   s

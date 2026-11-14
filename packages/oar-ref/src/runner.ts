@@ -1,90 +1,50 @@
-import { toolFingerprint } from './canonical.js';
-// The conformance runner evaluates local fixtures against declared capabilities.
+// The conformance runner: read the published corpus, replay each fixture, and
+// report per fixture. Files are read from a local directory — the corpus runs
+// offline and in CI, and never fetches anything.
 
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isDeepStrictEqual } from 'node:util';
 
-import { adoptionObstacle, loadCapability } from './capability.js';
-import { applyConfigs } from './config.js';
-import { CounterStore, decide, RESERVED_DETECTOR_IMPLS, type Result } from './decide.js';
-import { loadRuleSet } from './load.js';
-import type { Enforcement } from './vocab.js';
-
-/**
- * [OAR-CONF-31] One member of the multi-occurrence spelling: an anchor, its own
- * facts and activity window, the content at that occurrence, and optionally its
- * own `expected` asserting what that occurrence resolved to.
- */
-export interface FixtureOccurrence {
-  readonly anchor: string;
-  readonly facts?: Record<string, unknown>;
-  /** [OAR-CONF-25] Facts detector://fixture produces when a rule invokes it. */
-  readonly detector_facts?: Record<string, unknown>;
-  readonly recent_activity?: readonly string[];
-  readonly tool_call?: { readonly name: string; readonly arguments: Record<string, unknown> };
-  readonly content?: string;
-  readonly expected?: Record<string, unknown>;
-}
+import { referenceAnchorProfile, referenceEnvironment, validateAnchorProfile, withHostFacts, type Environment } from './env.js';
+import { loadRuleSet, type Rule } from './load.js';
+import { CounterStore, decide, ENGINE_MAINTAINED, type Detector, type Occurrence } from './decide.js';
+import type { Value } from './eval.js';
 
 export interface Fixture {
-  readonly id: string;
-  readonly title?: string;
-  readonly covers: readonly string[];
-  readonly rules: readonly unknown[];
-  readonly input: {
-    readonly anchor?: string;
-    readonly capability: unknown;
-    readonly facts?: Record<string, unknown>;
-    /** [OAR-CONF-25] Facts detector://fixture produces when a rule invokes it. */
-    readonly detector_facts?: Record<string, unknown>;
-    readonly recent_activity?: readonly string[];
-  readonly tool_call?: { readonly name: string; readonly arguments: Record<string, unknown> };
-    readonly session_id?: string;
-    readonly config?: readonly unknown[];
-    /** [OAR-CONF-34] The content at the occurrence, for a content anchor. */
-    readonly content?: string;
-    /** [OAR-CONF-31] The multi-occurrence spelling. */
-    readonly occurrences?: readonly FixtureOccurrence[];
+  id: string;
+  title: string;
+  covers: string[];
+  /** One rule document or an array of them. */
+  rule: unknown;
+  /** Hint documents loaded alongside the rules; they never perturb a decision. */
+  hints?: unknown[];
+  input: {
+    anchor: string;
+    facts: Record<string, Value>;
+    recent_tools?: string[];
+    session_id?: string;
+    /** Host-declared facts, name to declared type ([OAR-FACT-19]). */
+    host_facts?: Record<string, string>;
+    /** Overrides this engine's anchor profile map for the fixture. */
+    profile?: { oar_profile_version: string; core: Record<string, string>; unsupported: string[] };
+    /** Earlier occurrences, evaluated in order in the same session before this one. */
+    occurrences?: { anchor: string; facts: Record<string, Value>; recent_tools?: string[] }[];
   };
-  readonly expected: Record<string, unknown>;
+  expected: {
+    decision?: string;
+    code?: string;
+    on_fire?: string[];
+    applied?: string[];
+    counters?: Record<string, Record<string, number>>;
+    /** Rendered copy members to assert; `null` asserts the decision carries no copy. */
+    copy?: Record<string, string> | null;
+    error?: string;
+  };
 }
 
 export interface Manifest {
-  readonly oar: string;
-  readonly fixtures: readonly { id: string; file: string; title: string; covers: string[] }[];
-}
-
-/** What the engine actually produced, in the shape `expected` asserts. */
-export interface Actual {
-  decision?: string;
-  code?: string;
-  rule?: string;
-  applied?: string[];
-  on_fire?: string[];
-  transforms?: unknown[];
-  skipped_transforms?: unknown[];
-  counters?: Record<string, Record<string, number>>;
-  events?: ActualEvent[];
-  /** [OAR-CONF-34] The content after the accumulated transforms were applied. */
-  content?: string;
-  /** [OAR-COPY-7] Rendered copy of the winning rule. */
-  copy?: Record<string, string>;
-  /** [OAR-EVAL-20] Accumulated advisories, in evaluation order. */
-  advisories?: ActualAdvisory[];
-  error?: string;
-}
-
-export interface ActualEvent {
-  rule: string;
-  anchor: string;
-  effect: string;
-}
-
-export interface ActualAdvisory {
-  code?: string;
-  rule?: string;
-  copy?: Record<string, string>;
+  spec_version: string;
+  fixtures: { id: string; file: string; title: string; covers: string[] }[];
 }
 
 export interface FixtureResult {
@@ -92,29 +52,37 @@ export interface FixtureResult {
   readonly title: string;
   readonly covers: readonly string[];
   readonly pass: boolean;
-  /** [OAR-CONF-20], [OAR-CONF-24] A skipped fixture is not a passed fixture. */
-  readonly skipped: boolean;
   readonly detail?: string;
-  readonly actual?: Actual;
+  /** What the engine actually produced, for comparison across engines. */
+  readonly actual?: Verdict;
 }
 
-const EXPECTED_KEYS = new Set([
-  'decision',
-  'code',
-  'rule',
-  'on_fire',
-  'transforms', 'skipped_transforms',
-  'advisories',
-  'applied',
-  'counters',
-  'events',
-  'content',
-  'copy',
-  'error',
-]);
+export interface Verdict {
+  readonly error?: string;
+  readonly decision?: string;
+  readonly code?: string | null;
+  readonly applied?: readonly string[];
+  readonly on_fire?: readonly string[];
+  readonly counters?: Readonly<Record<string, Record<string, number>>>;
+  readonly copy?: Readonly<Record<string, string>> | null;
+}
+
+// The three detector references the corpus reserves. None needs a model or a
+// network: detector://fixture leaves the facts the fixture supplied in place,
+// which is how a fixture proves the rule owns the threshold.
+const RESERVED_DETECTORS: Record<string, Detector> = {
+  'detector://noop': () => ({}),
+  'detector://fixture': () => ({}),
+  'detector://error': () => {
+    throw new Error('detector://error always fails');
+  },
+};
+
+const DETECTOR_REFS = Object.keys(RESERVED_DETECTORS);
 
 export async function loadManifest(dir: string): Promise<Manifest> {
-  return JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8')) as Manifest;
+  const raw = await readFile(join(dir, 'manifest.json'), 'utf8');
+  return JSON.parse(raw) as Manifest;
 }
 
 export async function loadFixtures(dir: string): Promise<Fixture[]> {
@@ -123,256 +91,181 @@ export async function loadFixtures(dir: string): Promise<Fixture[]> {
     .sort();
   const out: Fixture[] = [];
   for (const name of names) {
-    out.push(JSON.parse(await readFile(join(dir, name), 'utf8')) as Fixture);
+    const raw = await readFile(join(dir, name), 'utf8');
+    out.push(JSON.parse(raw) as Fixture);
   }
   return out;
 }
 
+// The closed fixture vocabulary ([OAR-CONF-13], [OAR-CONF-15]).
+const FIXTURE_KEYS = new Set(['id', 'title', 'covers', 'rule', 'hints', 'input', 'expected']);
+const INPUT_KEYS = new Set(['anchor', 'facts', 'recent_tools', 'session_id', 'host_facts', 'profile', 'occurrences']);
+const OCCURRENCE_KEYS = new Set(['anchor', 'facts', 'recent_tools']);
+const EXPECTED_KEYS = new Set(['decision', 'code', 'on_fire', 'applied', 'counters', 'copy', 'error']);
+
+/** The first member outside the fixture vocabulary, or null when the shape is closed. */
+export function fixtureShapeError(fx: Fixture): string | null {
+  const record = fx as unknown as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (!FIXTURE_KEYS.has(key)) return `fixture carries undefined member ${JSON.stringify(key)}`;
+  }
+  for (const key of ['input', 'expected']) {
+    if (record[key] === undefined) return `fixture is missing ${JSON.stringify(key)}`;
+  }
+  if (record['rule'] === undefined && record['hints'] === undefined) {
+    return 'fixture carries neither "rule" nor "hints"';
+  }
+  for (const key of Object.keys(fx.input ?? {})) {
+    if (!INPUT_KEYS.has(key)) return `input carries undefined member ${JSON.stringify(key)}`;
+  }
+  for (const key of Object.keys(fx.expected ?? {})) {
+    if (!EXPECTED_KEYS.has(key)) return `expected carries undefined key ${JSON.stringify(key)}`;
+  }
+  for (const occ of fx.input?.occurrences ?? []) {
+    for (const key of Object.keys(occ)) {
+      if (!OCCURRENCE_KEYS.has(key)) return `occurrence carries undefined member ${JSON.stringify(key)}`;
+    }
+  }
+  // [OAR-CONF-13] Engine-maintained facts are reached through occurrences, never supplied.
+  for (const facts of [fx.input?.facts ?? {}, ...(fx.input?.occurrences ?? []).map((o) => o.facts ?? {})]) {
+    for (const name of ENGINE_MAINTAINED) {
+      if (name in facts) return `facts supply ${name}, which the engine maintains itself [OAR-FIRE-10]`;
+    }
+  }
+  if (fx.input?.occurrences && fx.input.session_id === undefined) {
+    return 'occurrences need a session_id to share';
+  }
+  return null;
+}
+
 /** Replay one fixture and report what, if anything, did not match. */
 export function runFixture(fx: Fixture): FixtureResult {
-  const base = { id: fx.id, title: fx.title ?? fx.id, covers: fx.covers };
-
-  // [OAR-CONF-22] An expected key this specification does not define is a
-  // rejection, not a silent pass.
-  for (const key of Object.keys(fx.expected)) {
-    if (!EXPECTED_KEYS.has(key)) {
-      return { ...base, pass: false, skipped: false, detail: `expected carries undefined key ${JSON.stringify(key)}` };
-    }
+  const base = { id: fx.id, title: fx.title, covers: fx.covers };
+  // [OAR-CONF-15] An undefined expected key is refused, never passed silently.
+  const shapeError = fixtureShapeError(fx);
+  if (shapeError !== null) {
+    return { ...base, pass: false, detail: shapeError };
   }
+  let env: Environment = referenceEnvironment();
+  // A fixture whose outcome turns on which core anchors a host supports carries
+  // its own profile map, so every implementation is asked the same question.
+  const fixtureProfile = fx.input?.profile;
+  const ruleDocs = Array.isArray(fx.rule) ? fx.rule : fx.rule !== undefined ? [fx.rule] : [];
+  const hintDocs = Array.isArray(fx.hints) ? fx.hints : [];
 
-  // [OAR-CONF-19] Every fixture declares the host it assumes.
-  if (fx.input?.capability === undefined) {
-    return { ...base, pass: false, skipped: false, detail: 'fixture carries no input.capability' };
-  }
-  // Fixtures supply their capability document ([OAR-CONF-20]).
-  const obstacle = adoptionObstacle(fx.input.capability);
-  if (obstacle !== null) {
-    return { ...base, pass: false, skipped: true, detail: obstacle };
-  }
-
-  // [OAR-CONF-31] `occurrences` is the multi-occurrence spelling; a fixture
-  // without one describes a single occurrence taken from `input` directly. Both
-  // run as one session against one counter store, each occurrence's side-effects
-  // applied before the next is evaluated.
-  const single: FixtureOccurrence = {
-    anchor: fx.input.anchor ?? '',
-    ...(fx.input.facts === undefined ? {} : { facts: fx.input.facts }),
-    ...(fx.input.detector_facts === undefined ? {} : { detector_facts: fx.input.detector_facts }),
-    ...(fx.input.recent_activity === undefined ? {} : { recent_activity: fx.input.recent_activity }),
-    ...(fx.input.content === undefined ? {} : { content: fx.input.content }),
-    ...(fx.input.tool_call === undefined ? {} : { tool_call: fx.input.tool_call }),
-  };
-  const occurrences: readonly FixtureOccurrence[] = fx.input.occurrences ?? [single];
-
-  const actual: Actual = {};
-  // The fixture-level expected.counters describes the values in force after
-  // every occurrence, so per-occurrence reports are merged in order.
-  const cumulative: Record<string, Record<string, number>> = {};
-  const perOccurrence: { at: number; actual: Actual; expected?: Record<string, unknown> }[] = [];
-
+  let rules: Rule[] = [];
+  let profile = referenceAnchorProfile();
+  let loadError: string | null = null;
   try {
-    const env = loadCapability(fx.input.capability);
-    const set = loadRuleSet(fx.rules, env);
-    let enforcement: ReadonlyMap<string, Enforcement> = new Map();
-    if (fx.input.config !== undefined) enforcement = applyConfigs(fx.input.config, set);
-    const counters = new CounterStore();
-    const activity: string[] = [];
-
-    for (let at = 0; at < occurrences.length; at++) {
-      const occ = occurrences[at]!;
-      const callFacts = occ.tool_call === undefined ? {} : { tool: occ.tool_call.name, tool_args: occ.tool_call.arguments, tool_args_fingerprint: toolFingerprint(occ.tool_call.name, occ.tool_call.arguments) };
-      const result: Result = decide(
-        set,
-        {
-          anchor: occ.anchor,
-          facts: { ...callFacts, ...occ.facts },
-          recentActivity: occ.recent_activity ?? activity,
-          sessionId: fx.input.session_id ?? 'fixture',
-          ...(occ.content === undefined ? {} : { content: occ.content }),
-          ...(occ.detector_facts === undefined ? {} : { detectorFacts: occ.detector_facts }),
-        },
-        { env, detectors: RESERVED_DETECTOR_IMPLS, counters, enforcement },
-      );
-      if (env.coreForLocal.get(occ.anchor) === 'tool.pre_invoke' && result.decision?.effect !== 'block' && occ.tool_call !== undefined && env.activityWindow > 0) {
-        activity.push(occ.tool_call.name);
-        activity.splice(0, Math.max(0, activity.length - env.activityWindow));
-      }
-      const seen = report(result);
-      for (const [key, pair] of Object.entries(seen.counters ?? {})) cumulative[key] = pair;
-      perOccurrence.push({ at, actual: seen, ...(occ.expected === undefined ? {} : { expected: occ.expected }) });
+    if (fixtureProfile) {
+      profile = validateAnchorProfile({
+        version: fixtureProfile.oar_profile_version,
+        core: fixtureProfile.core ?? {},
+        unsupported: fixtureProfile.unsupported ?? [],
+      });
     }
+    if (fx.input?.host_facts) env = withHostFacts(env, fx.input.host_facts);
+    rules = loadRuleSet(ruleDocs, hintDocs, { env, profile, detectors: DETECTOR_REFS }).rules;
   } catch (err) {
-    actual.error = err instanceof Error ? err.message : String(err);
-    const want = fx.expected['error'];
-    if (typeof want !== 'string') {
-      return { ...base, pass: false, skipped: false, detail: `unexpected load error: ${actual.error}`, actual };
+    loadError = err instanceof Error ? err.message : String(err);
+  }
+
+  if (loadError !== null) {
+    const actual: Verdict = { error: loadError };
+    if (fx.expected.error === undefined) {
+      return { ...base, pass: false, detail: `unexpected load error: ${loadError}`, actual };
     }
-    // [OAR-CONF-21] `error` matches when the engine's error contains the given
-    // text; an engine is not required to match wording beyond that substring.
-    if (!actual.error.includes(want)) {
-      return {
-        ...base,
-        pass: false,
-        skipped: false,
-        detail: `load error ${JSON.stringify(actual.error)} does not contain ${JSON.stringify(want)}`,
-        actual,
-      };
+    if (!loadError.includes(fx.expected.error)) {
+      return { ...base, pass: false, detail: `load error ${JSON.stringify(loadError)} does not contain ${JSON.stringify(fx.expected.error)}`, actual };
     }
-    return { ...base, pass: true, skipped: false, actual };
+    return { ...base, pass: true, actual };
+  }
+  if (fx.expected.error !== undefined) {
+    return { ...base, pass: false, detail: `expected a load error containing ${JSON.stringify(fx.expected.error)}, the document loaded` };
   }
 
-  // [OAR-CONF-31] The fixture-level expected describes the final occurrence.
-  const last = perOccurrence[perOccurrence.length - 1]!;
-  Object.assign(actual, last.actual);
-  actual.counters = cumulative;
-
-  if (typeof fx.expected['error'] === 'string') {
-    return {
-      ...base,
-      pass: false,
-      skipped: false,
-      detail: `expected a load error containing ${JSON.stringify(fx.expected['error'])}, the rule set loaded`,
-      actual,
-    };
+  const toOccurrence = (o: { anchor: string; facts?: Record<string, Value>; recent_tools?: string[] }): Occurrence => ({
+    anchor: profile.core[o.anchor] ?? o.anchor,
+    facts: o.facts ?? {},
+    recentTools: o.recent_tools ?? [],
+    sessionID: fx.input.session_id,
+  });
+  const store = new CounterStore();
+  const opts = { env, detectors: RESERVED_DETECTORS };
+  let result: ReturnType<typeof decide>;
+  try {
+    for (const earlier of fx.input.occurrences ?? []) decide(rules, toOccurrence(earlier), opts, store);
+    result = decide(rules, toOccurrence(fx.input), opts, store);
+  } catch (err) {
+    return { ...base, pass: false, detail: `engine error: ${err instanceof Error ? err.message : String(err)}` };
   }
 
-  const fail = (detail: string): FixtureResult => ({ ...base, pass: false, skipped: false, detail, actual });
-
-  // Per-occurrence failures retain their occurrence index.
-  for (const entry of perOccurrence) {
-    if (entry.expected === undefined) continue;
-    const where = `occurrence ${entry.at + 1} of ${perOccurrence.length}: `;
-    const detail = compare(entry.actual, entry.expected, occurrences[entry.at]!);
-    if (detail !== null) return fail(where + detail);
-  }
-
-  const detail = compare({ ...last.actual, counters: cumulative }, fx.expected, occurrences[last.at]!);
-  if (detail !== null) return fail(detail);
-  return { ...base, pass: true, skipped: false, actual };
-}
-
-/** Project one engine result into the shape `expected` asserts. */
-function report(result: Result): Actual {
-  const counters: Record<string, Record<string, number>> = {};
-  for (const [key, pair] of Object.entries(result.counters)) {
-    counters[key] = { fire_count: pair.fire_count, breaker_count: pair.breaker_count };
-  }
-  return {
+  const actual: Verdict = {
     decision: result.decision?.effect ?? 'none',
-    ...(result.decision === null ? {} : { code: result.decision.code, rule: result.decision.rule }),
+    code: result.decision?.code ?? null,
     applied: result.trace.map((e) => `${e.rule}:${e.outcome}`),
-    on_fire: [...result.onFire],
-    transforms: [...result.transforms],
-    skipped_transforms: [...result.skippedTransforms],
-    counters,
-    events: result.events.map((event) => ({ ...event })),
-    ...(result.content === undefined ? {} : { content: result.content }),
-    ...(result.decision === null || Object.keys(result.decision.copy).length === 0
-      ? {}
-      : { copy: { ...result.decision.copy } }),
-    // [OAR-EVAL-20] Always report the list so a fixture can assert emptiness
-    // when the winning effect is not advisory.
-    advisories: (result.decision?.advisories ?? []).map((a) => ({
-      code: a.code,
-      rule: a.rule,
-      ...(Object.keys(a.copy).length === 0 ? {} : { copy: { ...a.copy } }),
-    })),
+    on_fire: result.decision?.onFire ?? [],
+    counters: result.counters,
+    copy: result.decision?.copy ?? null,
   };
+  const check = checkExpected(fx, result);
+  return check === null ? { ...base, pass: true, actual } : { ...base, pass: false, detail: check, actual };
 }
 
-/** Compare one occurrence's outcome against what a fixture asserted about it. */
-function compare(
-  actual: Actual,
-  expected: Record<string, unknown>,
-  occ: FixtureOccurrence,
-): string | null {
-  if (expected['skipped_transforms'] !== undefined && !isDeepStrictEqual(actual.skipped_transforms, expected['skipped_transforms'])) return 'skipped_transforms differs';
-  if (expected['decision'] !== undefined && actual.decision !== expected['decision']) {
-    return `decision = ${String(actual.decision)}, want ${String(expected['decision'])}`;
-  }
-  if (expected['code'] !== undefined && actual.code !== expected['code']) {
-    return `code = ${String(actual.code)}, want ${String(expected['code'])}`;
-  }
-  if (expected['rule'] !== undefined && actual.rule !== expected['rule']) {
-    return `rule = ${String(actual.rule)}, want ${String(expected['rule'])}`;
-  }
-  if (expected['applied'] !== undefined) {
-    const want = expected['applied'] as string[];
-    const got = actual.applied ?? [];
-    if (got.join(',') !== want.join(',')) {
-      return `applied = [${got.join(', ')}], want [${want.join(', ')}]`;
-    }
-  }
-  if (expected['on_fire'] !== undefined) {
-    const want = expected['on_fire'] as string[];
-    const got = actual.on_fire ?? [];
-    if (got.join(',') !== want.join(',')) {
-      return `on_fire = [${got.join(', ')}], want [${want.join(', ')}]`;
-    }
-  }
-  if (expected['events'] !== undefined) {
-    const want = JSON.stringify(expected['events']);
-    const got = JSON.stringify(actual.events ?? []);
-    if (got !== want) return `events = ${got}, want ${want}`;
-  }
-  if (expected['transforms'] !== undefined) {
-    const want = JSON.stringify(expected['transforms']);
-    const got = JSON.stringify(actual.transforms ?? []);
-    if (got !== want) return `transforms = ${got}, want ${want}`;
-  }
-  if (expected['content'] !== undefined) {
-    // [OAR-CONF-34] A fixture asserting expected.content must supply content.
-    if (occ.content === undefined) {
-      return 'asserts expected.content without supplying input.content';
-    }
-    // Compared by code point sequence.
-    const want = [...(expected['content'] as string)].join('');
-    const got = [...(actual.content ?? '')].join('');
-    if (got !== want) return `content = ${JSON.stringify(got)}, want ${JSON.stringify(want)}`;
-  }
-  if (expected['copy'] !== undefined) {
-    const want = expected['copy'] as Record<string, string>;
-    const got = actual.copy ?? {};
-    for (const [key, value] of Object.entries(want)) {
-      if (got[key] !== value) {
-        return `copy.${key} = ${JSON.stringify(got[key])}, want ${JSON.stringify(value)}`;
+/** The first way the result misses the fixture's expectation, or null. */
+function checkExpected(fx: Fixture, result: ReturnType<typeof decide>): string | null {
+  const exp = fx.expected;
+  if (exp.decision !== undefined) {
+    const want = exp.decision.toLowerCase();
+    if (want === 'none' || want === 'allow') {
+      if (result.decision !== null) {
+        return `expected no actionable decision, got ${result.decision.effect} ${result.decision.code}`;
       }
-    }
-  }
-  if (expected['advisories'] !== undefined) {
-    // [OAR-CONF-37] Compare by length and order; a fixture asserts only the
-    // members it is about on each item.
-    const want = expected['advisories'] as ActualAdvisory[];
-    const got = actual.advisories ?? [];
-    if (got.length !== want.length) {
-      return `advisories length = ${got.length}, want ${want.length}`;
-    }
-    for (let i = 0; i < want.length; i++) {
-      const w = want[i]!;
-      const g = got[i]!;
-      if (w.code !== undefined && g.code !== w.code) {
-        return `advisories[${i}].code = ${JSON.stringify(g.code)}, want ${JSON.stringify(w.code)}`;
+    } else {
+      if (result.decision === null) {
+        return `expected decision ${want}, got none`;
       }
-      if (w.rule !== undefined && g.rule !== w.rule) {
-        return `advisories[${i}].rule = ${JSON.stringify(g.rule)}, want ${JSON.stringify(w.rule)}`;
+      if (result.decision.effect !== want) {
+        return `expected effect ${want}, got ${result.decision.effect} (${result.decision.code})`;
       }
-      if (w.copy !== undefined) {
-        const gotCopy = g.copy ?? {};
-        for (const [key, value] of Object.entries(w.copy)) {
-          if (gotCopy[key] !== value) {
-            return `advisories[${i}].copy.${key} = ${JSON.stringify(gotCopy[key])}, want ${JSON.stringify(value)}`;
-          }
+      if (exp.code !== undefined && result.decision.code !== exp.code) {
+        return `expected code ${exp.code}, got ${result.decision.code}`;
+      }
+      for (const action of exp.on_fire ?? []) {
+        if (!result.decision.onFire.includes(action as never)) {
+          return `expected on_fire ${action}, got ${result.decision.onFire.join(', ') || 'none'}`;
         }
       }
     }
   }
-  if (expected['counters'] !== undefined) {
-    for (const [key, wanted] of Object.entries(expected['counters'] as Record<string, Record<string, number>>)) {
-      for (const [name, value] of Object.entries(wanted)) {
-        // [OAR-CONF-21] An asserted zero matches an absent entry: an engine
-        // reports only the counters an occurrence changed.
-        const got = actual.counters?.[key]?.[name] ?? 0;
-        if (got !== value) return `counter ${key}/${name} = ${got}, want ${value}`;
+  if (exp.applied !== undefined) {
+    const got = result.trace.map((e) => `${e.rule}:${e.outcome}`);
+    if (got.join(',') !== exp.applied.join(',')) {
+      return `applied trace = [${got.join(', ')}], want [${exp.applied.join(', ')}]`;
+    }
+  }
+  if (exp.copy !== undefined) {
+    if (result.decision === null) {
+      return 'expected rendered copy, got no decision';
+    }
+    if (exp.copy === null) {
+      if (result.decision.copy !== undefined) {
+        return `expected no copy, got ${JSON.stringify(result.decision.copy)}`;
+      }
+    } else {
+      for (const [member, want] of Object.entries(exp.copy)) {
+        const got = result.decision.copy?.[member];
+        if (got !== want) {
+          return `copy ${member} = ${JSON.stringify(got ?? null)}, want ${JSON.stringify(want)}`;
+        }
+      }
+    }
+  }
+  for (const [code, want] of Object.entries(exp.counters ?? {})) {
+    for (const [kind, value] of Object.entries(want)) {
+      const got = result.counters[code]?.[kind] ?? 0;
+      if (got !== value) {
+        return `counter ${code}/${kind} = ${got}, want ${value}`;
       }
     }
   }
@@ -383,19 +276,18 @@ export interface RunReport {
   readonly results: readonly FixtureResult[];
   readonly passed: number;
   readonly failed: number;
-  readonly skipped: number;
   readonly clauses: readonly string[];
 }
 
 export async function runCorpus(dir: string): Promise<RunReport> {
-  const results = (await loadFixtures(dir)).map(runFixture);
+  const fixtures = await loadFixtures(dir);
+  const results = fixtures.map(runFixture);
   const clauses = new Set<string>();
-  for (const r of results) if (!r.skipped) for (const c of r.covers) clauses.add(c);
+  for (const r of results) for (const c of r.covers) clauses.add(c);
   return {
     results,
     passed: results.filter((r) => r.pass).length,
-    failed: results.filter((r) => !r.pass && !r.skipped).length,
-    skipped: results.filter((r) => r.skipped).length,
+    failed: results.filter((r) => !r.pass).length,
     clauses: [...clauses].sort(),
   };
 }

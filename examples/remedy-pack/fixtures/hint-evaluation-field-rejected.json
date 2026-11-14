@@ -1,0 +1,25 @@
+{
+  "id": "hint-evaluation-field-rejected",
+  "title": "A hint carrying an evaluation field is a load error",
+  "covers": [
+    "OAR-HINT-1",
+    "OAR-HINT-5"
+  ],
+  "hints": [
+    {
+      "spec_version": "1.0",
+      "id": "TOOL_OUTPUT_SPILL_CAPPED",
+      "namespace": "example.remedy",
+      "kind": "hint",
+      "when": "tool == \"read\"",
+      "what": "The tool's output was capped before it reached the model."
+    }
+  ],
+  "input": {
+    "anchor": "tool.pre_invoke",
+    "facts": {}
+  },
+  "expected": {
+    "error": "when"
+  }
+}

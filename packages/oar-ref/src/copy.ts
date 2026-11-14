@@ -1,231 +1,410 @@
-import { canonicalDouble } from './canonical.js';
-// Frozen copy-binding language ([OAR-COPY-1]–[OAR-COPY-8]).
+// Copy bindings — Appendix B of the specification.
 //
-// Copy is presentation. This module parses bindings at load, collects the fact
-// names they reference, and substitutes after the decision is resolved. It is
-// not the condition language, and it is not a host template dialect.
+// `copy` members are presentation strings that may name declared facts. The
+// language is frozen and small: a substitution, a conditional, and nothing
+// else. It is not the condition language of section 5 and not a host template
+// dialect. Parsing happens at load — a malformed construct or an unknown
+// binding is a load failure, never a runtime default ([OAR-COPY-2],
+// [OAR-COPY-3], [OAR-COPY-4]). Rendering happens after the decision is
+// resolved ([OAR-COPY-1], [OAR-COPY-7]).
 
-import type { FactType } from './vocab.js';
-import { zeroValue, validateFactValue, type Value } from './eval.js';
+import type { Environment } from './env.js';
+import { factValue, type EvalContext, type Value } from './eval.js';
+import { RuleLoadError } from './load.js';
 
-export class CopyLoadError extends Error {
+/** The copy members a rule document may carry ([OAR-DOC-18]). */
+export const COPY_MEMBERS = ['what', 'cause', 'why', 'fix', 'instead', 'message'] as const;
+export type CopyMember = (typeof COPY_MEMBERS)[number];
+
+export type CopyPart =
+  | { readonly kind: 'literal'; readonly text: string }
+  | { readonly kind: 'binding'; readonly name: string }
+  | {
+      readonly kind: 'conditional';
+      readonly name: string;
+      readonly negated: boolean;
+      readonly then: readonly CopyPart[];
+      readonly other: readonly CopyPart[];
+    };
+
+/** Rendering failed because an observation is unavailable or wrongly typed. */
+export class CopyRenderError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'CopyLoadError';
+    this.name = 'CopyRenderError';
   }
 }
 
-const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
+const IDENT_RE = /[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*/y;
 
-const INTERPOLATABLE = new Set<FactType>(['string', 'bool', 'int', 'double', 'list<string>']);
-
-type Node =
-  | { kind: 'text'; value: string }
-  | { kind: 'bind'; name: string }
-  | { kind: 'if'; name: string; negate: boolean; then: Node[]; else: Node[] };
-
-export interface CopyBinding {
-  readonly name: string;
-  readonly interpolate: boolean;
+/**
+ * Parses and validates one copy member. Load-time rules enforced here:
+ * every `{{ }}` and `{% %}` construct must derive from the Appendix B grammar
+ * ([OAR-COPY-3]); every binding and conditional must name a declared fact
+ * ([OAR-COPY-2]); every binding must name an interpolatable type
+ * ([OAR-COPY-4]). Conditionals may test a fact of any type — every type has a
+ * zero value under [OAR-FACT-25].
+ */
+export function parseCopyTemplate(
+  ruleID: string,
+  member: string,
+  text: string,
+  env: Environment,
+): CopyPart[] {
+  const seg = parseSegments(ruleID, member, text, 0, false);
+  const parts = seg.parts;
+  checkBindings(ruleID, member, parts, env);
+  return parts;
 }
 
-function isWs(ch: string): boolean {
-  return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
+/**
+ * Every fact name a template references through a binding or a conditional,
+ * for the [OAR-COPY-5] requires_facts check.
+ */
+export function copyReferences(parts: readonly CopyPart[]): Set<string> {
+  const names = new Set<string>();
+  const walk = (ps: readonly CopyPart[]) => {
+    for (const p of ps) {
+      if (p.kind === 'binding') names.add(p.name);
+      if (p.kind === 'conditional') {
+        names.add(p.name);
+        walk(p.then);
+        walk(p.other);
+      }
+    }
+  };
+  walk(parts);
+  return names;
 }
 
-function skipWs(s: string, i: number): number {
-  while (i < s.length && isWs(s[i]!)) i++;
+/**
+ * Renders a parsed template against a fact map. Throws CopyRenderError when a
+ * value has the wrong runtime type for its binding — a fact-provider failure
+ * the caller routes per [OAR-COPY-10].
+ */
+export function renderCopy(
+  parts: readonly CopyPart[],
+  facts: Readonly<Record<string, Value>>,
+  env: Environment,
+): string {
+  const ctx: EvalContext = { facts, env, functions: {} };
+  let out = '';
+  for (const part of parts) {
+    if (part.kind === 'literal') {
+      out += part.text;
+    } else if (part.kind === 'binding') {
+      out += renderValue(factValue(part.name, ctx));
+    } else {
+      const nonZero = isNonZero(factValue(part.name, ctx));
+      const branch = (part.negated ? !nonZero : nonZero) ? part.then : part.other;
+      out += renderCopy(branch, facts, env);
+    }
+  }
+  return out;
+}
+
+/** Renders every member of a rule's copy object. */
+export function renderCopyRecord(
+  copy: Readonly<Record<string, readonly CopyPart[]>>,
+  facts: Readonly<Record<string, Value>>,
+  env: Environment,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [member, parts] of Object.entries(copy)) {
+    out[member] = renderCopy(parts, facts, env);
+  }
+  return out;
+}
+
+// --- parsing -----------------------------------------------------------------
+
+type Segment =
+  | { readonly terminator: null; readonly parts: CopyPart[]; readonly end: number }
+  | { readonly terminator: 'else' | 'endif'; readonly parts: CopyPart[]; readonly end: number };
+
+/**
+ * Scans copy text from `start` until end-of-text or the next `{% else %}` /
+ * `{% endif %}` directive (which is consumed and reported, not included).
+ */
+function parseSegments(
+  ruleID: string,
+  member: string,
+  text: string,
+  start: number,
+  nested: boolean,
+): Segment {
+  const parts: CopyPart[] = [];
+  let i = start;
+  let literalStart = start;
+  const flush = () => {
+    if (i > literalStart) parts.push({ kind: 'literal', text: text.slice(literalStart, i) });
+  };
+  while (i < text.length) {
+    if (text.startsWith('{{', i)) {
+      flush();
+      const parsed = parseBinding(ruleID, member, text, i);
+      parts.push({ kind: 'binding', name: parsed.name });
+      i = parsed.end;
+      literalStart = i;
+    } else if (text.startsWith('{%', i)) {
+      const directive = peekDirective(ruleID, member, text, i);
+      if (directive === 'else' || directive === 'endif') {
+        if (!nested) {
+          throw new RuleLoadError(
+            `rule ${ruleID} copy member ${member}: {% ${directive} %} outside a conditional`,
+          );
+        }
+        flush();
+        const end = skipDirective(text, i);
+        return { terminator: directive, parts, end };
+      }
+      flush();
+      const parsed = parseConditional(ruleID, member, text, i);
+      parts.push(parsed.part);
+      i = parsed.end;
+      literalStart = i;
+    } else {
+      i += 1;
+    }
+  }
+  flush();
+  return { terminator: null, parts, end: text.length };
+}
+
+function parseBinding(
+  ruleID: string,
+  member: string,
+  text: string,
+  start: number,
+): { name: string; end: number } {
+  let i = start + 2;
+  i = skipWs(text, i);
+  const name = readIdentifier(ruleID, member, text, i, 'binding');
+  i = skipWs(text, i + name.length);
+  if (!text.startsWith('}}', i)) {
+    throw new RuleLoadError(
+      `rule ${ruleID} copy member ${member}: unterminated binding — expected }}`,
+    );
+  }
+  return { name, end: i + 2 };
+}
+
+function parseConditional(
+  ruleID: string,
+  member: string,
+  text: string,
+  start: number,
+): { part: CopyPart; end: number } {
+  let i = start + 2;
+  i = skipWs(text, i);
+  if (!text.startsWith('if', i) || !isWsOrEnd(text, i + 2)) {
+    throw new RuleLoadError(
+      `rule ${ruleID} copy member ${member}: {% %} must open with if — the construct is not in the copy grammar`,
+    );
+  }
+  i = skipWs(text, i + 2);
+  let negated = false;
+  if (text.startsWith('not', i) && isWsOrEnd(text, i + 3)) {
+    negated = true;
+    i = skipWs(text, i + 3);
+  }
+  const name = readIdentifier(ruleID, member, text, i, 'conditional');
+  i = skipWs(text, i + name.length);
+  if (!text.startsWith('%}', i)) {
+    throw new RuleLoadError(
+      `rule ${ruleID} copy member ${member}: unterminated conditional header — expected %}`,
+    );
+  }
+  i += 2;
+  const thenSeg = parseSegments(ruleID, member, text, i, true);
+  let other: CopyPart[] = [];
+  let terminator = thenSeg.terminator;
+  let end = thenSeg.end;
+  if (terminator === 'else') {
+    const elseSeg = parseSegments(ruleID, member, text, thenSeg.end, true);
+    if (elseSeg.terminator !== 'endif') {
+      throw new RuleLoadError(
+        `rule ${ruleID} copy member ${member}: unterminated conditional — expected {% endif %}`,
+      );
+    }
+    other = elseSeg.parts;
+    terminator = elseSeg.terminator;
+    end = elseSeg.end;
+  }
+  if (terminator !== 'endif') {
+    throw new RuleLoadError(
+      `rule ${ruleID} copy member ${member}: unterminated conditional — expected {% endif %}`,
+    );
+  }
+  return { part: { kind: 'conditional', name, negated, then: thenSeg.parts, other }, end };
+}
+
+/** Reads the keyword of the directive opening at `start` (`{% keyword`). */
+function peekDirective(ruleID: string, member: string, text: string, start: number): string {
+  let i = skipWs(text, start + 2);
+  const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(text.slice(i));
+  const word = m?.[0] ?? '';
+  if (word !== 'if' && word !== 'else' && word !== 'endif') {
+    throw new RuleLoadError(
+      `rule ${ruleID} copy member ${member}: {% ${word || '…'} %} is not a construct of the copy grammar — expected if, else, or endif`,
+    );
+  }
+  return word;
+}
+
+function skipDirective(text: string, start: number): number {
+  const close = text.indexOf('%}', start);
+  return close === -1 ? text.length : close + 2;
+}
+
+function readIdentifier(
+  ruleID: string,
+  member: string,
+  text: string,
+  start: number,
+  what: string,
+): string {
+  IDENT_RE.lastIndex = start;
+  const m = IDENT_RE.exec(text);
+  if (!m || m.index !== start) {
+    throw new RuleLoadError(
+      `rule ${ruleID} copy member ${member}: ${what} must name a fact identifier`,
+    );
+  }
+  return m[0];
+}
+
+function skipWs(text: string, i: number): number {
+  while (i < text.length && isWs(text[i]!)) i += 1;
   return i;
 }
 
-function readIdent(s: string, i: number): { name: string; next: number } | null {
-  i = skipWs(s, i);
-  const start = i;
-  if (i >= s.length || !/[A-Za-z_]/.test(s[i]!)) return null;
-  i++;
-  while (i < s.length && /[A-Za-z0-9_.]/.test(s[i]!)) i++;
-  const name = s.slice(start, i);
-  if (!IDENT_RE.test(name)) return null;
-  return { name, next: skipWs(s, i) };
+function isWs(c: string): boolean {
+  return c === ' ' || c === '\t' || c === '\n' || c === '\r';
 }
 
-function parseTag(s: string, i: number, open: '{{' | '{%'): { body: string; next: number } {
-  if (i + open.length > s.length) throw new CopyLoadError('endif');
-  const close = open === '{{' ? '}}' : '%}';
-  const end = s.indexOf(close, i + open.length);
-  if (end < 0) throw new CopyLoadError(open === '{{' ? 'binding' : 'conditional');
-  return { body: s.slice(i + open.length, end), next: end + close.length };
+function isWsOrEnd(text: string, i: number): boolean {
+  return i >= text.length || isWs(text[i]!);
 }
 
-function parseNodes(s: string, from: number, until: Set<string>): { nodes: Node[]; next: number } {
-  const nodes: Node[] = [];
-  let i = from;
-  while (i < s.length) {
-    const bindAt = s.indexOf('{{', i);
-    const tagAt = s.indexOf('{%', i);
-    let next = -1;
-    let open: '{{' | '{%' = '{{';
-    if (bindAt >= 0 && (tagAt < 0 || bindAt <= tagAt)) {
-      next = bindAt;
-      open = '{{';
-    } else if (tagAt >= 0) {
-      next = tagAt;
-      open = '{%';
-    }
-    if (next < 0) {
-      if (s.slice(i)) nodes.push({ kind: 'text', value: s.slice(i) });
-      return { nodes, next: s.length };
-    }
-    if (next > i) nodes.push({ kind: 'text', value: s.slice(i, next) });
-    const tag = parseTag(s, next, open);
-    if (open === '{{') {
-      const ident = readIdent(tag.body, 0);
-      if (ident === null || ident.next !== tag.body.length) throw new CopyLoadError('binding');
-      nodes.push({ kind: 'bind', name: ident.name });
-      i = tag.next;
-      continue;
-    }
-    let p = skipWs(tag.body, 0);
-    const wordEnd = p;
-    while (p < tag.body.length && /[A-Za-z]/.test(tag.body[p]!)) p++;
-    const word = tag.body.slice(wordEnd, p);
-    p = skipWs(tag.body, p);
-    if (until.has(word) && p === tag.body.length) {
-      return { nodes, next };
-    }
-    if (word === 'if') {
-      let negate = false;
-      if (tag.body.slice(p, p + 3) === 'not' && (p + 3 === tag.body.length || isWs(tag.body[p + 3]!))) {
-        negate = true;
-        p = skipWs(tag.body, p + 3);
-      }
-      const ident = readIdent(tag.body, p);
-      if (ident === null || ident.next !== tag.body.length) throw new CopyLoadError('if');
-      const thenPart = parseNodes(s, tag.next, new Set(['else', 'endif']));
-      let elseNodes: Node[] = [];
-      let after = thenPart.next;
-      const closer = parseTag(s, thenPart.next, '{%');
-      let q = skipWs(closer.body, 0);
-      const wStart = q;
-      while (q < closer.body.length && /[A-Za-z]/.test(closer.body[q]!)) q++;
-      const closerWord = closer.body.slice(wStart, q);
-      q = skipWs(closer.body, q);
-      if (q !== closer.body.length) throw new CopyLoadError(closerWord || 'conditional');
-      if (closerWord === 'else') {
-        const elsePart = parseNodes(s, closer.next, new Set(['endif']));
-        elseNodes = elsePart.nodes;
-        const endTag = parseTag(s, elsePart.next, '{%');
-        let e = skipWs(endTag.body, 0);
-        const eStart = e;
-        while (e < endTag.body.length && /[A-Za-z]/.test(endTag.body[e]!)) e++;
-        const endWord = endTag.body.slice(eStart, e);
-        e = skipWs(endTag.body, e);
-        if (endWord !== 'endif' || e !== endTag.body.length) throw new CopyLoadError(endWord || 'endif');
-        after = endTag.next;
-      } else if (closerWord === 'endif') {
-        after = closer.next;
-      } else {
-        throw new CopyLoadError(closerWord || 'conditional');
-      }
-      nodes.push({ kind: 'if', name: ident.name, negate, then: thenPart.nodes, else: elseNodes });
-      i = after;
-      continue;
-    }
-    throw new CopyLoadError(word || 'conditional');
-  }
-  return { nodes, next: i };
-}
+// --- load-time binding checks -------------------------------------------------
 
-function walk(nodes: Node[], visit: (n: Node) => void): void {
-  for (const n of nodes) {
-    visit(n);
-    if (n.kind === 'if') {
-      walk(n.then, visit);
-      walk(n.else, visit);
-    }
-  }
-}
-
-/** Parse a copy member and return every fact it names. */
-export function parseCopy(source: string): CopyBinding[] {
-  const { nodes, next } = parseNodes(source, 0, new Set());
-  if (next !== source.length && next < source.length) {
-    // A leftover `{% else %}` / `{% endif %}` at the top level is an illegal construct.
-    if (source.slice(next).includes('{%')) throw new CopyLoadError('conditional');
-  }
-  const out: CopyBinding[] = [];
-  const seen = new Set<string>();
-  walk(nodes, (n) => {
-    if (n.kind === 'bind') {
-      if (!seen.has(`bind:${n.name}`)) {
-        seen.add(`bind:${n.name}`);
-        out.push({ name: n.name, interpolate: true });
-      }
-    } else if (n.kind === 'if') {
-      if (!seen.has(`if:${n.name}`)) {
-        seen.add(`if:${n.name}`);
-        out.push({ name: n.name, interpolate: false });
+function checkBindings(
+  ruleID: string,
+  member: string,
+  parts: readonly CopyPart[],
+  env: Environment,
+): void {
+  const walk = (ps: readonly CopyPart[]) => {
+    for (const p of ps) {
+      if (p.kind === 'conditional') {
+        requireFact(ruleID, member, p.name, env, 'conditional');
+        walk(p.then);
+        walk(p.other);
+      } else if (p.kind === 'binding') {
+        const decl = requireFact(ruleID, member, p.name, env, 'binding');
+        if (!INTERPOLATABLE.has(decl.type)) {
+          throw new RuleLoadError(
+            `rule ${ruleID} copy member ${member} binds {{ ${p.name} }} of type ${decl.type}, which cannot be interpolated`,
+          );
+        }
       }
     }
-  });
-  return out;
-}
-
-function isZero(value: Value): boolean {
-  if (typeof value === 'boolean') return value === false;
-  if (typeof value === 'bigint') return value === 0n;
-  if (typeof value === 'number') return value === 0;
-  if (typeof value === 'string') return value === '';
-  if (Array.isArray(value)) return value.length === 0;
-  if (value !== null && typeof value === 'object') return Object.keys(value).length === 0;
-  return true;
-}
-
-function interpolate(value: Value): string {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (typeof value === 'bigint') return value.toString(10);
-  if (typeof value === 'number') return canonicalDouble(value);
-  if (Array.isArray(value) && value.every((x) => typeof x === 'string')) {
-    return (value as readonly string[]).join(', ');
-  }
-  return '';
-}
-
-function renderNodes(nodes: Node[], lookup: (name: string) => Value): string {
-  let out = '';
-  for (const n of nodes) {
-    if (n.kind === 'text') {
-      out += n.value;
-      continue;
-    }
-    if (n.kind === 'bind') {
-      out += interpolate(lookup(n.name));
-      continue;
-    }
-    const take = n.negate ? isZero(lookup(n.name)) : !isZero(lookup(n.name));
-    out += renderNodes(take ? n.then : n.else, lookup);
-  }
-  return out;
-}
-
-/** Substitute bindings in a copy member that has already passed load. */
-export function renderCopy(source: string, lookup: (name: string) => Value): string {
-  if (!source.includes('{{') && !source.includes('{%')) return source;
-  const { nodes } = parseNodes(source, 0, new Set());
-  return renderNodes(nodes, lookup);
-}
-
-export function copyLookup(
-  facts: Readonly<Record<string, unknown>>,
-  types: ReadonlyMap<string, FactType>,
-): (name: string) => Value {
-  return (name: string): Value => {
-    const raw = facts[name];
-    if (raw !== undefined) return validateFactValue(raw, types.get(name) ?? "string", name);
-    const typ = types.get(name);
-    return typ === undefined ? '' : zeroValue(typ);
   };
+  walk(parts);
 }
 
-export { INTERPOLATABLE };
+function requireFact(
+  ruleID: string,
+  member: string,
+  name: string,
+  env: Environment,
+  what: string,
+): { type: string } {
+  const decl = env.facts[name];
+  if (!decl) {
+    throw new RuleLoadError(
+      `rule ${ruleID} copy member ${member} ${what === 'binding' ? 'binds' : 'tests'} {{ ${name} }}, which is not a declared fact`,
+    );
+  }
+  return decl;
+}
+
+const INTERPOLATABLE = new Set(['string', 'bool', 'int', 'double', 'list<string>']);
+
+// --- rendering ----------------------------------------------------------------
+
+function isNonZero(v: Value): boolean {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'bigint') return v !== 0n;
+  if (typeof v === 'number') return v !== 0;
+  if (typeof v === 'string') return v !== '';
+  if (Array.isArray(v)) return v.length > 0;
+  if (v === null) return false;
+  return Object.keys(v).length > 0;
+}
+
+function renderValue(v: Value): string {
+  if (typeof v === 'string') return v;
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (typeof v === 'bigint') return v.toString();
+  if (typeof v === 'number') return canonicalDouble(v);
+  if (Array.isArray(v)) {
+    for (const item of v) {
+      if (typeof item !== 'string') {
+        throw new CopyRenderError('list<string> member is not a string at render time');
+      }
+    }
+    return v.join(', ');
+  }
+  throw new CopyRenderError('value of a map type cannot be interpolated');
+}
+
+/**
+ * [OAR-COPY-9] The shortest decimal significand that round-trips to the same
+ * finite binary64 value, expanded into ordinary decimal notation with a
+ * leading zero before a fractional value and `.0` appended when there is no
+ * fractional part. Both signed zeroes render as `0.0`.
+ */
+export function canonicalDouble(v: number): string {
+  if (!Number.isFinite(v)) throw new CopyRenderError('double is not finite');
+  if (v === 0) return '0.0';
+  const neg = v < 0;
+  const abs = neg ? -v : v;
+  // Number.prototype.toPrecision rounds correctly; the first precision whose
+  // result round-trips is the shortest round-tripping significand. (Exact
+  // ties between two equally close p-digit decimals choose the larger under
+  // toPrecision; a tie that still round-trips is unreachable for binary64 at
+  // the shortest length, so this matches the ties-to-even rule in practice.)
+  let s = '';
+  for (let p = 1; p <= 17; p++) {
+    s = abs.toPrecision(p);
+    if (Number(s) === abs) break;
+  }
+  let t = expandExponent(s);
+  if (t.startsWith('.')) t = '0' + t;
+  if (!t.includes('.')) t += '.0';
+  return (neg ? '-' : '') + t;
+}
+
+/** Rewrites `1.5e-7` as `0.00000015` and `1e+21` as `1000000000000000000000`. */
+function expandExponent(s: string): string {
+  const e = s.indexOf('e');
+  if (e === -1) return s;
+  const mant = s.slice(0, e);
+  const exp = Number(s.slice(e + 1));
+  const neg = mant.startsWith('-');
+  const unsigned = neg ? mant.slice(1) : mant;
+  const point = unsigned.indexOf('.');
+  const digits = unsigned.replace('.', '');
+  const decimalPos = (point === -1 ? unsigned.length : point) + exp;
+  let t: string;
+  if (decimalPos <= 0) {
+    t = '0.' + '0'.repeat(-decimalPos) + digits;
+  } else if (decimalPos >= digits.length) {
+    t = digits + '0'.repeat(decimalPos - digits.length);
+  } else {
+    t = digits.slice(0, decimalPos) + '.' + digits.slice(decimalPos);
+  }
+  return neg ? '-' + t : t;
+}

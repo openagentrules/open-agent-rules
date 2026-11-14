@@ -5,7 +5,7 @@
 # the generated directory to Cloudflare Pages.
 #
 # Gates, in order — parity with `task check`:
-#   1. spec gates       — vocabulary, clause identifiers, schemas, coverage, capability
+#   1. spec gates       — vocabulary, clause identifiers, schemas, coverage
 #   2. site:check        — site/ builds and validates (JSON, links, sitemap, _headers)
 #   3. reference impl    — typecheck, unit tests, zero runtime deps, corpus, lint
 #

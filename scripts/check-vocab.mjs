@@ -2,16 +2,17 @@
 // Gate: the vocabulary tables printed in the specification are the vocabulary.
 //
 // vocabulary.yaml is the machine-readable source of truth for the core facts,
-// the capability profiles, and the core anchors. The specification prints the
+// the standard profiles, and the core anchors. The specification prints the
 // same three vocabularies as markdown tables so a reader never has to open a
 // second file. Two copies of a normative list drift, and a drifting fact type
 // is a rule that loads on one engine and is rejected by the next — so this
 // gate parses both and compares them row by row.
 //
 // The markdown is delimited by comment markers:
-//   <!-- oar:table core -->     ... <!-- /oar:table -->
-//   <!-- oar:table profiles -->  ... <!-- /oar:table -->
-//   <!-- oar:table anchors -->   ... <!-- /oar:table -->
+//   <!-- oar:table core-facts -->        ... <!-- /oar:table -->
+//   <!-- oar:table core-functions -->    ... <!-- /oar:table -->
+//   <!-- oar:table standard-profiles --> ... <!-- /oar:table -->
+//   <!-- oar:table core-anchors -->      ... <!-- /oar:table -->
 //
 // Two normalisations are applied before comparing, and only two:
 //   * backticks are stripped from markdown cells — the prose marks identifiers
@@ -91,11 +92,10 @@ function table(text, where) {
 }
 
 // Compare a fact table against a list of { name, type, observation }.
-function compareFacts(md, facts, where, nameHeader) {
+function compareFacts(md, facts, where, header) {
   if (!md) return;
-  const want = [nameHeader, 'Type', 'Observation'];
-  if (md.header.join(' | ') !== want.join(' | ')) {
-    fail(`${where}: header is "${md.header.join(' | ')}", expected "${want.join(' | ')}"`);
+  if (md.header.join(' | ') !== header.join(' | ')) {
+    fail(`${where}: header is "${md.header.join(' | ')}", expected "${header.join(' | ')}"`);
   }
   if (md.rows.length !== facts.length) {
     fail(`${where}: ${md.rows.length} rows in the spec, ${facts.length} in vocabulary.yaml`);
@@ -127,24 +127,49 @@ function compareFacts(md, facts, where, nameHeader) {
   }
 }
 
-// --- 5.3 core facts ---------------------------------------------------------
+// --- 5.2/5.3 core facts and functions ---------------------------------------
+// The specification prints a fact table and a function table under distinct
+// markers.
 
-const coreBlock = block('core');
-if (coreBlock === null) fail('no <!-- oar:table core --> block in the specification');
-else compareFacts(table(coreBlock, 'core table'), vocab.core.facts, 'core table', 'Name');
+const coreBlock = block('core-facts');
+if (coreBlock === null) {
+  fail('no <!-- oar:table core-facts --> block in the specification');
+} else {
+  compareFacts(
+    table(coreBlock, 'core facts table'),
+    vocab.core.facts,
+    'core facts table',
+    ['Fact', 'Type', 'Observation'],
+  );
+}
+
+const functionsBlock = block('core-functions');
+if (functionsBlock === null) {
+  fail('no <!-- oar:table core-functions --> block in the specification');
+} else {
+  compareFacts(
+    table(functionsBlock, 'core functions table'),
+    vocab.core.functions ?? [],
+    'core functions table',
+    ['Function', 'Signature', 'Observation'],
+  );
+}
 
 // --- 5.4 standard profiles --------------------------------------------------
 
-const profilesBlock = block('profiles');
+const profilesBlock = block('standard-profiles');
 if (profilesBlock === null) {
-  fail('no <!-- oar:table profiles --> block in the specification');
+  fail('no <!-- oar:table standard-profiles --> block in the specification');
 } else {
   // Each profile is a `**Profile \`name\`** — description` line followed by a
-  // table. Split on the heading lines so a missing or reordered profile shows
-  // up as a name mismatch rather than a silently ignored section.
+  // table. The description is optional (the spec prints the bare heading when
+  // a profile has none); when present in both, it is compared. Split on the
+  // heading lines so a missing
+  // or reordered profile shows up as a name mismatch rather than a silently
+  // ignored section.
   const chunks = [];
   for (const line of profilesBlock.split('\n')) {
-    const heading = /^\*\*Profile `([^`]+)`\*\*\s*—\s*(.+?)\s*$/.exec(line.trim());
+    const heading = /^\*\*Profile `([^`]+)`\*\*(?:\s*—\s*(.+?))?\s*$/.exec(line.trim());
     if (heading) chunks.push({ name: heading[1], description: heading[2], body: [] });
     else if (chunks.length > 0) chunks.at(-1).body.push(line);
     else if (line.trim() !== '') fail(`profiles block: stray line before the first profile: ${line}`);
@@ -168,21 +193,28 @@ if (profilesBlock === null) {
       fail(`profiles: position ${i + 1} is \`${md.name}\` in the spec, \`${yml.name}\` in vocabulary.yaml`);
       continue;
     }
-    const lower = (s) => s.charAt(0).toLowerCase() + s.slice(1);
-    if (lower(unstyle(md.description)) !== lower(String(yml.description).replace(/\s+/g, ' ').trim())) {
-      fail(
-        `profile \`${yml.name}\`: description drifted\n    spec: ${md.description}\n    yaml: ${yml.description}`,
-      );
+    if (md.description !== undefined && yml.description !== undefined) {
+      const lower = (s) => s.charAt(0).toLowerCase() + s.slice(1);
+      if (lower(unstyle(md.description)) !== lower(String(yml.description).replace(/\s+/g, ' ').trim())) {
+        fail(
+          `profile \`${yml.name}\`: description drifted\n    spec: ${md.description}\n    yaml: ${yml.description}`,
+        );
+      }
     }
-    compareFacts(table(md.body.join('\n'), `profile \`${yml.name}\``), yml.facts, `profile \`${yml.name}\``, 'Name');
+    compareFacts(
+      table(md.body.join('\n'), `profile \`${yml.name}\``),
+      yml.facts,
+      `profile \`${yml.name}\``,
+      ['Name', 'Type', 'Observation'],
+    );
   }
 }
 
 // --- 8.1 core anchors -------------------------------------------------------
 
-const anchorsBlock = block('anchors');
+const anchorsBlock = block('core-anchors');
 if (anchorsBlock === null) {
-  fail('no <!-- oar:table anchors --> block in the specification');
+  fail('no <!-- oar:table core-anchors --> block in the specification');
 } else {
   const md = table(anchorsBlock, 'anchors table');
   const declared = vocab.anchors ?? [];
@@ -232,9 +264,11 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
+const functionCount = (vocab.core.functions ?? []).length;
 const factCount =
   vocab.core.facts.length + (vocab.profiles ?? []).reduce((n, p) => n + p.facts.length, 0);
 console.log(
-  `ok: ${factCount} facts across the core tier and ${(vocab.profiles ?? []).length} profiles, ` +
+  `ok: ${factCount} facts and ${functionCount} core functions across the core tier and ` +
+    `${(vocab.profiles ?? []).length} profiles, ` +
     `${(vocab.anchors ?? []).length} core anchors — spec tables match vocabulary.yaml`,
 );

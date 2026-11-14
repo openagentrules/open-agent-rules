@@ -22,7 +22,7 @@ The idea that makes this work is a division of labour:
 > The host produces facts. The rule composes facts. The engine renders effects.
 
 A **fact** is an observation the host publishes about its own state — typed, named, and free
-of judgement. `secret_matches` is a fact: it is a list of spans a detector reported, and it
+of judgement. `prompt_injection_score` is a fact: it is a number a detector reported, and it
 says nothing about whether the content should be delivered. `content_is_unsafe` is *not* a
 fact. It is a conclusion, and the moment a host publishes it, the policy has moved back into
 the host's code where nobody can read it.
@@ -32,11 +32,11 @@ they are the parts an operator argues about, tunes, and audits. So they have to 
 reviewer can see and change them:
 
 ```yaml
-when: 'prompt_injection_score > 0.8 && session_posture != "internal"'
+when: 'prompt_injection_score > 0.8 && tool != "internal_search"'
 ```
 
 Everything about that line is reviewable. The detector produced a number; the *rule* decided
-that 0.8 is the bar and that internal sessions are exempt. Move the threshold into the
+that 0.8 is the bar and that the internal search tool is exempt. Move the threshold into the
 detector and the same policy becomes invisible.
 
 This is why the specification states observation-not-verdict as a requirement on fact
@@ -46,36 +46,35 @@ the callback model with extra syntax.
 ## One rule, annotated (non-normative)
 
 ```yaml
-oar: "1.0"                      # format marker and version
+spec_version: "1.0"             # format version
 id: READ_OUTSIDE_SCOPE          # stable; the identifier the decision carries
 namespace: acme.security        # publisher scope; identity is (namespace, id)
 kind: policy                    # fixes evaluation order, nothing else
-anchor: tool.pre_invoke         # a core anchor: before the tool runs
+on: tool.pre_invoke             # a core anchor: before the tool runs
 selector:
-  tool: [read, grep]            # the clause names the `tool` fact; clauses are AND
-requires:
-  profiles: [tool, filesystem]  # what this rule needs the host to provide
-when: 'path_outside_scope(tool)'   # composition of observations
+  tools: [read, grep]           # matches when the core fact `tool` is one of these
+requires_facts:                 # every non-core fact the rule reads
+  - path_outside_scope
+when: 'path_outside_scope'      # an observation; the rule decides what it means
 effect: block                   # what the engine does when the condition holds
 on_error: fail_closed           # if this cannot be evaluated, block
-copy:
-  what: "The call reads outside the declared scope."
-  fix: "Read inside scope, or widen the scope deliberately."
+what: "The call reads outside the declared scope."
+fix: "Read inside scope, or widen the scope deliberately."
 ```
 
-Eight lines carry the whole policy, and `copy` carries the explanation the caller sees.
-Members MAY contain the frozen bindings of Appendix C — `{{ fact }}` and
+Eight lines carry the whole policy, and the copy fields carry the explanation the caller
+sees. Members MAY contain the frozen bindings of Appendix B — `{{ fact }}` and
 `{% if fact %}` — so occurrence values reach the prose without a host template
 dialect. The engine substitutes after the decision; two rules that differ only
-in `copy` still produce the same decision.
-`anchor` and `selector` say *where*; `when` says *whether*; `effect` and `on_error` say *what
-happens*, including when the check itself fails. `requires` is the line that makes portability
-computable: a reader can tell from the document alone which engines will run it, without
-consulting any of them. Clause references:
+in copy still produce the same decision.
+`on` and `selector` say *where*; `when` says *whether*; `effect` and `on_error` say *what
+happens*, including when the check itself fails. `requires_facts` is the line that makes
+portability computable: a reader can tell from the document alone which engines will run it,
+without consulting any of them. Clause references:
 [`[OAR-SEL-1]`](https://openagentrules.org/spec/1.0/#3-anchors-and-selection),
 [`[OAR-EVAL-4]`](https://openagentrules.org/spec/1.0/#4-evaluation),
-[`[OAR-FACT-20]`](https://openagentrules.org/spec/1.0/#5-1-capability-profiles),
-[`[OAR-OPS-3]`](https://openagentrules.org/spec/1.0/#7-operational-semantics).
+[`[OAR-DOC-22]`](https://openagentrules.org/spec/1.0/#2-1-optional-fields),
+[`[OAR-OPS-2]`](https://openagentrules.org/spec/1.0/#7-operational-semantics).
 
 ## Why not Rego, or Cedar
 
@@ -89,7 +88,7 @@ invents its own input document. A Rego policy for one agent runtime reads
 runs on the other's system, and neither can be tested without that system's input shape.
 
 Open Agent Rules fixes the vocabularies that generality leaves open: the lifecycle moments
-(core anchors), the typed observations (the core tier and the capability profiles), and the
+(core anchors), the typed observations (the fact tiers), and the
 condition language. That is a real loss of expressiveness, and it buys three things nothing
 else on the list has — a rule that runs unchanged on another engine, a rule that can be tested
 against a published fixture corpus without the host, and a rule whose complete input surface is
@@ -149,17 +148,30 @@ questions.
 
 The sections below explain the format's main design choices and their tradeoffs.
 
-## Capability profiles over a mandatory core catalogue
+## Fact tiers and the portability contract
 
 A single mandatory fact catalogue would require every conforming engine to provide every fact.
 A model gateway with no file system would still have to publish `is_directory`, most likely as
 `false` forever. A rule written against it would load, evaluate, and mean nothing while the
 operator sees a passing conformance run.
 
-A capability profile is a named bundle of facts that an engine provides whole or not at all
-([`[OAR-FACT-16]`](https://openagentrules.org/spec/1.0/#5-1-capability-profiles)). The engine
-declares which profiles it provides; the rule declares which it needs; the engine refuses at
-load any rule it cannot serve. Nothing is stubbed, because nothing has to be.
+1.0 answers with tiers instead of a catalogue
+([`[OAR-FACT-11]`](https://openagentrules.org/spec/1.0/#5-1-fact-tiers)). A `core` fact is one
+every conforming engine provides ([`[OAR-FACT-12]`]). A `standard` fact belongs to a named
+profile — filesystem, content safety, MCP — that an engine provides whole or not at all
+([`[OAR-FACT-13]`]). A `host` fact is the engine's own observation, published under a
+namespace it owns so that two engines cannot collide on a bare name
+([`[OAR-FACT-15]`]). Nothing is stubbed, because nothing has to be.
+
+The rule's side of the contract is `requires_facts`
+([`[OAR-DOC-22]`]): the rule names every fact outside the core that it reads, and an engine
+that does not provide one of them rejects the rule at load
+([`[OAR-CONF-4]`](https://openagentrules.org/spec/1.0/#10-conformance)) rather than failing
+condition compilation or evaluating a default. A rule is *portable* — the word the format
+commits to — when its anchor is a core anchor and its facts come from the core and standard
+tiers ([`[OAR-PROF-5]`](https://openagentrules.org/spec/1.0/#8-portability-profiles)); the
+host publishes an anchor profile map saying which core anchors it supports
+([`[OAR-PROF-2]`]), so the same negotiation covers the moments, not only the facts.
 
 This is capability negotiation, which is how the Model Context Protocol handles the same
 problem: a server advertises what it has, a client asks for what it needs, and the absence of a
@@ -170,114 +182,156 @@ vocabulary marked required must refuse the schema rather than validate part of i
 make the same trade: a more complicated handshake, in exchange for never being wrong about what
 the other side actually does.
 
-The cost is real. A rule now has to say what it needs, and a rule that omits `requires` for a
-non-core fact is rejected
-([`[OAR-FACT-20]`](https://openagentrules.org/spec/1.0/#5-1-capability-profiles)). That is one
+The cost is real. A rule now has to say what it needs, and a rule that omits the declaration
+for a fact outside the core tier is rejected. That is one
 more line per rule, and it is the line that makes portability a property of the document rather
 than a claim about it.
 
-## Selector clauses are fact names
+## A closed selector
 
-A fixed selector vocabulary such as `principal`, `ledger`, `surface`, `phase`, and `workflow`
-would give those clauses no defined relationship to a fact, no declared type, and no sound
-behavior on an engine that does not model them. Silently matching such a clause would turn a
-scope into a no-op.
+A selector is for cheap, indexable narrowing, and 1.0 gives it exactly one clause: `tools`,
+which matches when the core fact `tool` is one of the names it lists
+([`[OAR-SEL-7]`](https://openagentrules.org/spec/1.0/#3-anchors-and-selection)). Everything
+else a rule wants to narrow by is a condition over declared facts, where it has a type and a
+tier.
 
-Read that again with `principal` in mind. `principal` is the multi-tenant scoping clause — the
-one an operator writes to say *this rule applies to that customer's traffic*. On an engine with
-no principal model, a rule scoped to one tenant applied to all of them, and a rule scoped to an
-administrative principal applied to everybody. Failing open on a scoping clause is not a
-cosmetic gap in a specification. It is a security bug that reads, in the configuration file,
-exactly like a working scope.
+The alternative was a vocabulary of host-shaped clauses — `principal`, `ledger`, `surface`,
+`phase`, `workflow` — with no defined relationship to a fact, no declared type, and no sound
+behaviour on an engine that does not model them. Silently matching such a clause turns a scope
+into a no-op. Read that with `principal` in mind: it is the multi-tenant scoping clause, the one
+an operator writes to say *this rule applies to that customer's traffic*. On an engine with no
+principal model, a rule scoped to one tenant would apply to all of them. Failing open on a
+scoping clause is a security bug that reads, in the configuration file, exactly like a working
+scope.
 
-A selector clause names a declared fact, and an engine rejects at load a clause naming a
-fact it does not declare
-([`[OAR-SEL-3]`](https://openagentrules.org/spec/1.0/#3-anchors-and-selection)). There is no
-second vocabulary to keep in sync, no clause without a type, and no way to write a scoping
-clause an engine will quietly ignore. The failure moved from runtime silence to a load error
-that names the clause, which is the only kind of failure an operator can act on.
+So the vocabulary is closed and published as a schema, and an engine rejects at load a clause
+it does not define. The one clause there is never matches where it has nothing to match against:
+`tools` does not select an occurrence at which no tool is invoked
+([`[OAR-SEL-6]`]). A host-specific dimension is a host-tier fact, and a rule that scopes on it
+says so in `requires_facts`, where the scope is visible and computably non-portable.
 
-## Transforms compose
+## One decision per occurrence
 
-Short-circuiting `transform` like `block` would prevent independent redactions from applying to
-one model response: whichever rule ran first would discard the rest. Content safety commonly
-needs several independent redactions over one payload, so transforms accumulate
-([`[OAR-OPS-15]`](https://openagentrules.org/spec/1.0/#7-2-transform)) and are applied in
-evaluation order, each to the output of the last, never merged and never reordered
-([`[OAR-OPS-16]`](https://openagentrules.org/spec/1.0/#7-2-transform)). The ordering is
-specified rather than left to the engine because two redactions with overlapping targets produce
-different output depending on which runs first, and a portable rule cannot mean two things.
+An occurrence gets one decision. Several rules may fire at it; the format says exactly how
+they combine, and it does so with three sentences rather than a negotiation mechanism.
 
-A `block` still discards them all
-([`[OAR-OPS-17]`](https://openagentrules.org/spec/1.0/#7-2-transform)): if the content is not
-delivered, there is nothing left to mutate.
+The order is fixed: ascending by `kind` in the sequence `schema`, `policy`, `invariant`,
+`detector`, then by `id`, then by `namespace`
+([`[OAR-EVAL-1]`](https://openagentrules.org/spec/1.0/#4-evaluation)). The first enforced rule
+that fires with `block` short-circuits the occurrence
+([`[OAR-EVAL-3]`]). What survives short-circuit resolves by precedence: `block`, then `nudge`,
+then `warn`, then the occurrence is allowed ([`[OAR-EVAL-4]`]).
 
-## Advisories compose
+Composition is therefore *ordering*, and a pack composes two rules by writing them in an order
+the format guarantees. The common case is specificity: a specific refusal and a general flag
+both match one call, the specific rule's identifier sorts first, its block short-circuits the
+occurrence, and the general rule is never evaluated. A 1.0-era `overrides` field existed to
+produce exactly this outcome; the deterministic order produces it without a second mechanism to
+misconfigure, and without a graph to cycle.
 
-A nudge is addressed to the agent and is meant to change the next step it takes. A warning is
-addressed to the operator reading the trace. Either way, several independent ones can hold of
-one occurrence: the session is near a spend ceiling *and* the last claim was ungrounded; two
-warnings an operator should both see. Naming one and discarding the rest is the same bug
-transforms had when they short-circuited.
+Nothing that fired is silently dropped. Every selected rule leaves its identifier and outcome
+— fired, passed, errored, or monitored — on the applied-rules trace
+([`[OAR-OPS-7]`](https://openagentrules.org/spec/1.0/#7-operational-semantics)), which is how
+an operator audits a decision. The decision names the winner; the trace is the full story.
+A `monitor` rule is recorded on the same trace and produces no effect
+([`[OAR-OPS-1]`]), which is the rollout path: watch a rule in production before enforcing it.
 
-So when the decision is `nudge` or `warn`, every enforced rule that fired with that effect is
-carried on `advisories`, in evaluation order, never merged and never reordered
-([`[OAR-EVAL-20]`](https://openagentrules.org/spec/1.0/#4-evaluation)). The decision still
-names one rule — the first in that order — so a consumer that branches on a single identifier
-has a deterministic primary. The list is what is presented. A suppressed rule, a `monitor`
-rule, and a rule that fired with a different effect do not appear. `block` and `transform`
-still outrank both, and when they win the list is empty: the occurrence is stopped or
-mutated, and the advisory is not the decision.
+The same reasoning retired the advisory list. When several nudges and warnings hold of one
+occurrence, earlier drafts carried them all on an `advisories` list; 1.0 resolves one decision by
+precedence and records the rest on the trace. A consumer that branches on a single identifier
+has one; an operator who wants the rest reads the trace. Two surfaces, each doing one job,
+instead of one surface doing both.
 
-This is the shape every neighbouring standard arrived at for independent constraints that
-share an occurrence. Content Security Policy enforces every policy and adding one can only
-restrict further. Gatekeeper and Kyverno report every matching violation, not the first.
-XACML accumulates obligations, and a combined decision that would drop them is Indeterminate.
-NeMo output rails compose rather than elect a winner. A format whose decision names one
-steer and silently drops the others would be the one that failed to learn it.
+## Copy is frozen substitution
 
-Copy stays frozen. Each advisory carries that rule's own rendered `copy`; the language is
-still a substitution and a conditional
-([`[OAR-COPY-9]`](https://openagentrules.org/spec/1.0/#appendix-c-copy-bindings-normative)).
-Prompt assembly — persona partials, board layout, spawn assignment — is instructions to the
-model, and stays out of the document.
+Copy — `what`, `cause`, `why`, `fix`, `instead`, `message` — is presentation, and the format
+freezes its grammar so a rule's words mean the same thing on every engine
+([Appendix B](https://openagentrules.org/spec/1.0/#appendix-b-copy-bindings-normative)).
+A binding `{{ fact }}` names a declared fact, and a mistyped name is a load failure, never a
+runtime default ([`[OAR-COPY-2]`]). A conditional `{% if fact %}…{% else %}…{% endif %}`
+branches on the fact's zero value ([`[OAR-COPY-3]`]). An engine rejects at load any binding
+or construct the grammar does not derive, so copy cannot grow a host template dialect by
+accident.
 
-## Declarative suppression, and configuration that is not a fork
+The zero-value semantics are the part worth reading twice. Every declared fact has a value at
+every occurrence ([`[OAR-FACT-25]`](https://openagentrules.org/spec/1.0/#5-5-fact-semantics)),
+and a zero value is a value, not an absence ([`[OAR-FACT-24]`]). So a binding at zero
+substitutes the zero — "applied 0 redactions", not a gap — and a conditional on an unreported
+bool takes its else branch. Copy *reads correctly when empty*: the sentence parses, the member
+stays present, and the decision is unchanged ([`[OAR-COPY-7]`],
+[`[OAR-COPY-6]`](https://openagentrules.org/spec/1.0/#appendix-b-copy-bindings-normative)).
+A fact named in copy is reached through `requires_facts` like any other
+([`[OAR-COPY-5]`]) — copy is presentation, not an exemption from the portability contract.
 
-Two mechanisms in 1.0 exist because a rule pack is written by one party and run by another.
+## The hint channel
 
-The first is suppression. A specific rule and the general rule it refines both fire, and the
-author wants only the specific one heard. Without a way to say so, authors negate the sibling
-rule's whole condition inside their own — which is hard to read the day it is written and wrong
-the day either rule changes. `overrides` names the rules a rule silences
-([`[OAR-EVAL-13]`](https://openagentrules.org/spec/1.0/#4-1-suppression)), does not compute a
-transitive closure, and is rejected at load when it forms a cycle or names a mandatory rule.
+Some situations a host handles are observed by the host's own machinery, not by the guard
+pipeline: a tool output capped before it reached the model, a result truncated at a size
+limit, a workflow phase that must exit first, a secret redacted on the way out. The guard
+pipeline has no fact for them — they are not observations at a lifecycle moment it evaluates —
+so no rule can read them, and neither `enforce` nor `monitor` fits: there is nothing to
+enforce. Earlier drafts published such copy as `enforcement: off` rules, which made every
+engine carry a rule-shaped object whose only live field was its prose.
 
-The second is operator configuration, and it is the more important of the two. An operator who
-cannot disable one rule in a vendor's pack forks the pack, and a forked pack stops receiving
-the vendor's updates — so the rules rot in exactly the deployment that was careful enough
-to review them.
+1.0 instead makes the channel first-class: the *hint*
+([section 9](https://openagentrules.org/spec/1.0/#9-the-hint-channel)). A hint is a document
+whose `kind` is `hint` and whose payload is copy
+([`[OAR-HINT-1]`](https://openagentrules.org/spec/1.0/#9-the-hint-channel)). Its `id` is the
+code the host raises ([`[OAR-HINT-2]`]); its copy is static, because there is no occurrence to
+bind against ([`[OAR-HINT-3]`]); and it never evaluates — loading one changes no decision and
+no copy ([`[OAR-HINT-6]`]).
 
-Every mature policy system in this space arrived at the same answer. OPA Gatekeeper gives each
+The rendering contract is a fallback chain ([`[OAR-HINT-4]`]): when the host raises a code, it
+renders the copy of the hint registered under that code; if no hint is registered, it renders
+the bare code; and a host that raises nothing renders nothing. The channel is additive at
+every step — no host behaviour depends on a hint being present, and a pack that ships hints
+alongside rules publishes its remedy copy without pretending the guard pipeline saw the
+situation. A hint is validated at load like any document
+([`[OAR-HINT-5]`]), so a malformed hint is a load error, not a silent gap.
+
+The dividing line is the fact. When the host *can* publish the observation as a host-tier
+fact, a rule binding it is the right vehicle: the threshold is in the rule and the decision is
+portable. When the guard pipeline has no fact and the host raises the situation on its own
+schedule, the copy is a hint. The example packs show both halves: `portable-pack` binds facts,
+`remedy-pack` carries the hints and the rules that bind host facts.
+
+## Disabling, watching, and mandatory rules
+
+A rule pack is written by one party and run by another, and the operator's side of that
+relationship needs three answers: watch before enforcing, keep a rule nobody may switch off,
+and disable the rest without forking the pack.
+
+Watching is `enforcement: monitor`
+([`[OAR-OPS-1]`](https://openagentrules.org/spec/1.0/#7-operational-semantics)): the rule
+evaluates, the outcome lands on the trace, and no effect is produced. It is the only mode
+besides `enforce` — 1.0's `off` is gone, and its legitimate use split into the two mechanisms
+that actually needed it: copy publication became the hint channel, and disabling a rule is
+removing it from the loaded set, which an operator can always do to a non-mandatory rule.
+
+Keeping a rule is `mandatory: true`
+([`[OAR-OPS-5]`](https://openagentrules.org/spec/1.0/#7-operational-semantics)): an engine
+MUST reject a configuration that disables, overrides, or removes it. The line exists because
+the rules an operator most wants to switch off mid-incident are the ones the pack author
+staked the pack's meaning on.
+
+Disabling the rest needs no format mechanism. A configuration that loads a subset of a pack is
+an engine's own feature, and the format's contribution is the property that makes it safe: a
+configuration changes whether and how loudly a rule runs, and never what it means. An operator
+who needs different logic writes a rule, where the change is reviewable as a rule.
+
+Every mature policy system in this space arrived at the same answers. OPA Gatekeeper gives each
 constraint an `enforcementAction` of `deny`, `dryrun`, or `warn`, so a policy can be watched in
 production before it refuses anything. Falco ships `override` blocks and `enabled: false`, so
 an operator can retune or switch off a shipped rule and still take upstream rule updates. The
 OWASP Core Rule Set has `SecRuleRemoveById`, which exists for no other purpose than letting a
 site drop one rule out of a pack it does not otherwise maintain.
 
-Open Agent Rules takes the same shape and draws one line the others leave implicit: a
-configuration document changes whether and how loudly a rule runs, and never what it means
-([`[OAR-CFG-6]`](https://openagentrules.org/spec/1.0/#9-operator-configuration)). It cannot
-edit an anchor, a selector, a condition, an effect, or the copy. An operator who needs
-different logic writes a rule, where the change is reviewable as a rule. `enforcement: monitor`
-is the rollout path; `enforcement: off` is the supported way to disable something without
-deleting it; and a configuration naming a rule that is not loaded is rejected, because a
-configuration that silently refers to nothing is indistinguishable from one that works.
+## Rejecting what it does not know
 
-## Rejecting a greater minor
-
-An engine rejects a document whose `oar` minor version is higher than its own
-([`[OAR-DOC-5]`](https://openagentrules.org/spec/1.0/#2-document-model)). This is the opposite
+An engine rejects a document carrying a field this specification does not define
+([`[OAR-DOC-19]`](https://openagentrules.org/spec/1.0/#2-1-optional-fields)), and rejects
+a document whose `spec_version` major it does not support before any other processing
+([`[OAR-CONF-2]`](https://openagentrules.org/spec/1.0/#10-conformance)). This is the opposite
 of the usual advice, and the usual advice is usually right.
 
 Protocol Buffers is the cautionary tale in the other direction. proto3 originally dropped
@@ -297,14 +351,17 @@ the engine's point of view nothing happened.
 
 Refusing to load is the only failure mode an operator can see. The cost is that one document
 cannot target a fleet running mixed minors, which
-[`[OAR-VER-4]`](https://openagentrules.org/spec/1.0/#11-extensibility-and-versioning) states
-plainly: author to the lowest minor in the fleet, and say in the pack which minor it needs.
+[`[OAR-DOC-24]`](https://openagentrules.org/spec/1.0/#11-extensibility-and-versioning) bounds
+by making every minor revision additive: a document written for an earlier minor of the same
+major remains valid. Extension fields that an engine must ignore are spelled `x-`, and
+nothing else gets that grace.
 
 ## A frozen expression grammar
 
 `when` is written in a small language with a published EBNF grammar, defined by what it
 excludes as much as by what it includes: no macros, no comprehensions, no time, no random
-source, no field selection, no regular expressions.
+source, no null, no regular expressions, and no field selection beyond reading one member of a
+map fact.
 
 Kubernetes did this work for admission control. ValidatingAdmissionPolicy does not say "CEL"
 and stop there — it pins an explicit set of CEL libraries, and adds a cost budget so that an
@@ -334,13 +391,14 @@ Two commands:
 
 ```bash
 curl -O https://openagentrules.org/spec/1.0/oar.schema.json
-npx @openagentrules/oar-ref https://openagentrules.org/spec/1.0/conformance/manifest.json
+node packages/oar-ref/bin/oar-conformance.mjs spec/oar/1.0/conformance
 ```
 
-Given the manifest URL, the reference runner fetches every fixture the manifest names and
-runs them, reporting pass, fail, and skip separately — a skipped fixture is not a passed
-fixture, and a baseline fixture may not be skipped at all. Point it at a local directory
-instead and it fetches nothing.
+The first fetches the document schema. The second replays the corpus from a checkout of this
+repository against the reference runner, which reads local files only and reports each fixture
+as passed or failed. Your own runner reports the fixtures it skipped and why: a skipped fixture
+is not a passed one, and only a fixture whose rules need a standard profile you do not claim
+may be skipped ([`[OAR-CONF-16]`]).
 
 Read the numbered runner algorithm in
 [section 10.1](https://openagentrules.org/spec/1.0/#10-1-the-runner-algorithm) of the

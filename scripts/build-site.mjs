@@ -275,7 +275,7 @@ const text = (html) => html.replace(/<[^>]+>/g, '').trim();
 function contents(body) {
   const items = [...body.matchAll(HEADING)].map(([, tag, id, inner]) => {
     const label = text(inner);
-    // "5.1 Capability profiles" and "Appendix A — ..." carry their own numbering;
+    // "5.4 Standard profiles" and "Appendix A — ..." carry their own numbering;
     // it goes in its own column so the titles line up down the rail.
     const m = /^(\d+(?:\.\d+)*)\.?\s+(.*)$/.exec(label) ?? /^Appendix\s+([A-Z])\s*[—-]\s*(.*)$/.exec(label);
     return { tag, id, n: m ? m[1] : '', label: m ? m[2] : label };
@@ -354,7 +354,7 @@ ${linkHeadings(body)}
 </article>
 </main>
 <footer>
-<nav><a href="https://github.com/paintedwolf-ai/open-agent-rules">Repository</a><a href="/spec/governance.html">Governance</a><a href="/spec/rationale.html">Rationale</a><a href="/spec/licence.html">Licence</a><a href="/spec/patents.html">Patents</a></nav>
+<nav><a href="https://github.com/openagentrules/open-agent-rules">Repository</a><a href="/spec/governance.html">Governance</a><a href="/spec/rationale.html">Rationale</a><a href="/spec/licence.html">Licence</a><a href="/spec/patents.html">Patents</a></nav>
 <p>Specification text CC BY 4.0. Schemas, corpus, and code Apache-2.0. A published patent
 non-assertion covenant covers every implementation.
 Anyone may implement this specification, for any purpose, without permission, notification, or fee.</p>
@@ -399,8 +399,8 @@ canonical schema <code class="url">${BASE}oar.schema.json</code></p>
   <li><a href="/spec/${VERSION}/schemas.html">Fetch the schemas</a></li>
   <li><a href="/spec/${VERSION}/conformance.html">Run the conformance corpus</a></li>
   <li><a href="/examples/portable-pack.html">A worked rule pack</a></li>
-  <li><a href="/examples/moderation-pack.html">Converting a moderation policy</a></li>
-  <li><a href="https://github.com/paintedwolf-ai/open-agent-rules">Repository</a></li>
+  <li><a href="/examples/remedy-pack.html">The hint channel</a></li>
+  <li><a href="https://github.com/openagentrules/open-agent-rules">Repository</a></li>
 </ul>
 ${renderMarkdown(rationaleMd)}`,
   }),
@@ -473,10 +473,10 @@ function buildSpecTree(v) {
       title: `Open Agent Rules ${v}`,
       here: 'spec',
       path: `spec/${v}/index.html`,
-      description: `The Open Agent Rules ${v} specification: document model, evaluation, facts and conditions, capability profiles, transforms, and the conformance runner algorithm.`,
+      description: `The Open Agent Rules ${v} specification: document model, evaluation, facts and conditions, portability profiles, the hint channel, and the conformance runner algorithm.`,
       body: `${renderMarkdown(specMd)}
 <hr>
-<p>This page is rendered from <a href="/spec/${v}/open-agent-rules.md">open-agent-rules.md</a>, the hand-authored source. The vocabulary printed in sections 5.3, 5.4 and 8.1 is also published as <a href="/spec/${v}/vocabulary.yaml">vocabulary.yaml</a>. See also <a href="/spec/${v}/extensions.html">Extensions</a>, <a href="/spec/rationale.html">Rationale</a> and <a href="/spec/governance.html">Governance</a>.</p>`,
+<p>This page is rendered from <a href="/spec/${v}/open-agent-rules.md">open-agent-rules.md</a>, the hand-authored source. The vocabulary printed in sections 5.2, 5.3, 5.4 and 8.1 is also published as <a href="/spec/${v}/vocabulary.yaml">vocabulary.yaml</a>. See also <a href="/spec/rationale.html">Rationale</a> and <a href="/spec/governance.html">Governance</a>.</p>`,
     }),
   );
 
@@ -526,7 +526,7 @@ function buildSpecTree(v) {
       title: `Schemas — Open Agent Rules ${v}`,
       here: 'schemas',
       path: `spec/${v}/schemas.html`,
-      description: `The published JSON Schemas for Open Agent Rules ${v}: rule documents, capability documents, operator configuration, and conformance fixtures, served with CORS for $ref resolution.`,
+      description: `The published JSON Schemas for Open Agent Rules ${v}: rule and hint documents, selectors, and portability profiles, served with CORS for $ref resolution.`,
       body: `<h1>Schemas</h1>
 <p>Every schema is served as <code>application/schema+json</code> with <code>Access-Control-Allow-Origin: *</code>, so a validator can follow the whole <code>$ref</code> chain from a URL alone. Inter-schema references are relative filenames, so the same set also resolves from a local directory with no network. A published version path never changes.</p>
 <div class="scroll">
@@ -537,7 +537,7 @@ ${schemaRows.join('\n')}
 </tbody>
 </table>
 </div>
-<p>The schemas check shape, not meaning. A document that validates can still be rejected at load — for a capability the host does not provide, an unresolvable anchor, or a condition that does not type-check. Those rejections are specified in <a href="/spec/${v}/#10-conformance">section 10</a>, and the corpus is what proves an engine performs them.</p>`,
+<p>The schemas check shape, not meaning. A document that validates can still be rejected at load — for a fact the host does not provide, an unresolvable anchor, or a condition that does not type-check. Those rejections are specified in <a href="/spec/${v}/#10-conformance">section 10</a>, and the corpus is what proves an engine performs them.</p>`,
     }),
   );
 
@@ -603,7 +603,7 @@ ${schemaRows.join('\n')}
       description: `The Open Agent Rules ${v} conformance corpus: ${fixtures.length} language-neutral JSON fixtures, each citing the clauses it exercises, with a machine-readable manifest.`,
       body: `<h1>Conformance</h1>
 <h2 id="run-the-corpus-against-your-implementation">Run the corpus against your implementation</h2>
-<p>Fetch the index, fetch each fixture it names, and run each one: load the fixture's <code>rules</code> against the host described by <code>input.capability</code>, apply the <code>input</code>, and compare against <code>expected</code>. An implementation claiming conformance passes every fixture whose declared capability set it can adopt, and reports the ones it skipped. A skipped fixture is not a passed fixture, and the ${baselineCount} fixtures the manifest marks <em>baseline</em> may not be skipped at all — their declared capability is one nothing conforming lacks.</p>
+<p>Fetch the index, fetch each fixture it names, and run each one: load the fixture's <code>rules</code>, apply the <code>input</code>, and compare against <code>expected</code>. An implementation claiming conformance passes every fixture, and reports the ones it skipped. A skipped fixture is not a passed fixture.${baselineCount > 0 ? ` The ${baselineCount} fixtures the manifest marks <em>baseline</em> may not be skipped at all.` : ''}</p>
 <pre><code>curl ${base}conformance/manifest.json</code></pre>
 <h2 id="the-runner-algorithm">The runner algorithm</h2>
 ${renderMarkdown(section(/runner algorithm/i))}
@@ -629,7 +629,7 @@ for (const name of ['LICENCE-SPEC.md', 'GOVERNANCE.md', 'RATIONALE.md', 'PATENTS
 }
 for (const [name, slug, title, description] of [
   ['GOVERNANCE.md', 'governance', 'Governance — Open Agent Rules',
-    'How the Open Agent Rules specification changes: the one-change rule, clause identifiers, versioning, the capability-profile lifecycle, and the extension registry.'],
+    'How the Open Agent Rules specification changes: the one-change rule, clause identifiers, versioning, the profile lifecycle, and the extension registry.'],
   ['RATIONALE.md', 'rationale', 'Rationale — Open Agent Rules',
     'Why Open Agent Rules exists, why it is not Rego, Cedar, a callback API, or a policy-engine manifest, and the reasoning behind its main design choices.'],
   ['LICENCE-SPEC.md', 'licence', 'Licence — Open Agent Rules',
@@ -664,20 +664,20 @@ const PACKS = [
     slug: 'portable-pack',
     title: 'A portable rule pack — Open Agent Rules',
     description:
-      'A worked Open Agent Rules pack: ten rules exercising most of the format, the capability document they assume, and an operator configuration.',
+      'A worked Open Agent Rules pack: eight rules across five files exercising most of the format, the profile document they assume, and nine fixtures replayed by the reference runner.',
   },
   {
-    slug: 'moderation-pack',
-    title: 'Converting a moderation policy — Open Agent Rules',
+    slug: 'remedy-pack',
+    title: 'The hint channel — Open Agent Rules',
     description:
-      'A hosted moderation policy of the kind the large model platforms ship, rewritten as Open Agent Rules — what maps directly and what does not.',
+      'The hint-channel pattern: rules whose copy binds a host fact, and hint documents a host raises by code, with the fallback chain and the copy-reads-correctly-when-empty invariant.',
   },
 ];
 
 const fileAnchor = (name) => `file-${name.replace(/\.yaml$/, '')}`;
 
 for (const { slug, title, description } of PACKS) {
-  const other = PACKS.find((p) => p.slug !== slug);
+  const others = PACKS.filter((p) => p.slug !== slug);
   const dir = join(REPO, 'examples', slug);
   const packReadme = read(join(dir, 'README.md'));
   const packFiles = readdirSync(dir)
@@ -725,7 +725,7 @@ for (const { slug, title, description } of PACKS) {
       description,
       body: `${renderMarkdown(packBody)}
 <hr>
-<p>The other worked example: <a href="/examples/${other.slug}.html">${escapeHtml(other.title.split(' — ')[0])}</a>.</p>
+<p>The other worked examples: ${others.map((o) => `<a href="/examples/${o.slug}.html">${escapeHtml(o.title.split(' — ')[0])}</a>`).join(', ')}.</p>
 ${packListings}`,
     }),
   );

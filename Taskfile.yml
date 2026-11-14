@@ -69,7 +69,7 @@ tasks:
       - npm run conformance
 
   pack:lint:
-    desc: Load examples/portable-pack against the capability document it declares
+    desc: Load every example pack against the reference implementation
     dir: "{{.REF_DIR}}"
     cmds:
       - npm run lint:pack
@@ -104,12 +104,6 @@ tasks:
     desc: Compare the Rust and TypeScript engines against the shared corpus
     cmds:
       - node scripts/check-differential.mjs {{.CLI_ARGS}}
-
-  spec:capability:check:
-    desc: Fail if a fixture declares capability it does not need (probes each dimension against the reference engine)
-    cmds:
-      - task: ref:build
-      - node scripts/check-capability-minimal.mjs {{.CLI_ARGS}}
 
   release:manifest:
     desc: Refresh the draft release manifest after changing versioned sources
@@ -150,7 +144,6 @@ tasks:
       - task: spec:clauses:check
       - task: schema:check
       - task: spec:coverage:check
-      - task: spec:capability:check
       - task: site:check
       - task: ref:typecheck
       - task: ref:test

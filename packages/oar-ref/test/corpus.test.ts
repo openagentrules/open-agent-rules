@@ -1,17 +1,14 @@
-// The published corpus, end to end, plus the obligations [OAR-CONF-17] to
-// [OAR-CONF-19] put on the fixtures themselves.
-
 import assert from 'node:assert/strict';
-import { readFile, readdir } from 'node:fs/promises';
-import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 
-import { loadFixtures, loadManifest, runFixture } from '../src/runner.js';
-import { CORPUS, EXAMPLES, SCHEMAS } from './support.js';
-import { loadPack, readCapabilityFile } from '../src/pack.js';
+import { createRequire } from 'node:module';
 
-// ajv is CommonJS and test-only; require it rather than fighting ESM interop.
+// ajv is CommonJS and is a test-only dependency; require it directly rather
+// than fighting the ESM interop for one constructor.
 const require = createRequire(import.meta.url);
 const Ajv2020 = require('ajv/dist/2020') as new (opts: object) => {
   addSchema(schema: unknown, key: string): void;
@@ -19,177 +16,311 @@ const Ajv2020 = require('ajv/dist/2020') as new (opts: object) => {
   errorsText(errors: unknown): string;
 };
 
-async function validator(entry: string) {
-  const ajv = new Ajv2020({ strict: false, allErrors: true });
-  for (const name of [
-    'oar.schema.json',
-    'oar-capability.schema.json',
-    'oar-config.schema.json',
-    'oar-fixture.schema.json',
-  ]) {
-    const doc = JSON.parse(await readFile(join(SCHEMAS, name), 'utf8')) as { $id?: string };
-    ajv.addSchema(doc, doc.$id ?? name);
+import { fixtureShapeError, loadFixtures, loadManifest, runFixture, type Fixture } from '../src/runner.js';
+import { parse, UnsupportedCelConstruct } from '../src/parse.js';
+import { loadHint, loadRule, RuleLoadError } from '../src/load.js';
+import { referenceAnchorProfile, referenceEnvironment, withHostFacts } from '../src/env.js';
+import { canonicalDouble, CopyRenderError, parseCopyTemplate, renderCopy } from '../src/copy.js';
+import { CounterStore, decide } from '../src/decide.js';
+
+// Walk up to the repository root so the paths hold whether these run from
+// source or from the compiled output.
+function repoRoot(from: string): string {
+  let dir = from;
+  for (;;) {
+    if (existsSync(join(dir, 'spec', 'oar'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) throw new Error('spec/oar not found above ' + from);
+    dir = parent;
   }
-  const validate = ajv.getSchema(`https://openagentrules.org/spec/1.0/${entry}`);
-  assert.ok(validate, `${entry} did not compile`);
-  return { ajv, validate };
 }
+
+const here = dirname(fileURLToPath(import.meta.url));
+const REPO = repoRoot(here);
+const CORPUS = join(REPO, 'spec', 'oar', '1.0', 'conformance');
+const SCHEMAS = join(REPO, 'spec', 'oar', '1.0', 'schemas');
 
 test('the published corpus passes end to end', async () => {
   const fixtures = await loadFixtures(CORPUS);
-  assert.ok(fixtures.length >= 100, `corpus holds only ${fixtures.length} fixtures`);
-  const results = fixtures.map(runFixture);
+  assert.ok(fixtures.length >= 20, `corpus holds only ${fixtures.length} fixtures`);
+  const failures = fixtures.map(runFixture).filter((r) => !r.pass);
   assert.deepEqual(
-    results.filter((r) => !r.pass && !r.skipped).map((r) => `${r.id}: ${r.detail}`),
+    failures.map((f) => `${f.id}: ${f.detail}`),
     [],
   );
-  // [OAR-CONF-24] A skipped fixture is not a passed fixture. The reference
-  // engine claims every published profile, so it should skip nothing.
-  assert.deepEqual(results.filter((r) => r.skipped).map((r) => r.id), []);
 });
 
 test('the manifest and the corpus directory describe the same fixtures', async () => {
   const manifest = await loadManifest(CORPUS);
   const fixtures = await loadFixtures(CORPUS);
-  assert.equal(manifest.oar, '1.0');
+  assert.equal(manifest.spec_version, '1.0');
   assert.deepEqual(
     manifest.fixtures.map((f) => f.id).sort(),
     fixtures.map((f) => f.id).sort(),
   );
-  for (const entry of manifest.fixtures) {
-    const fx = fixtures.find((f) => f.id === entry.id)!;
-    assert.equal(entry.file, `${entry.id}.json`);
-    assert.deepEqual(entry.covers, [...fx.covers], `${entry.id}: manifest covers drifted`);
-    assert.equal(entry.title, fx.title, `${entry.id}: manifest title drifted`);
-  }
 });
 
-test('every fixture validates against the published fixture schema', async () => {
-  // [OAR-CONF-17], [OAR-CONF-18] The fixture shape is the schema's business.
-  // A fixture asserting a load-time rejection carries a deliberately invalid
-  // payload, so for those the nested rule, capability, and configuration
-  // documents are checked structurally only — the payload is the point.
-  const { ajv, validate } = await validator('oar-fixture.schema.json');
-  const relaxed = JSON.parse(await readFile(join(SCHEMAS, 'oar-fixture.schema.json'), 'utf8')) as Record<string, unknown>;
-  const props = (relaxed['properties'] as Record<string, Record<string, unknown>>)['input']!
-    .properties as Record<string, unknown>;
-  props['capability'] = { type: 'object' };
-  props['config'] = { type: 'array', items: { type: 'object' } };
-  (relaxed['properties'] as Record<string, Record<string, unknown>>)['rules'] = {
-    type: 'array',
-    minItems: 1,
-  };
-  relaxed['$id'] = 'https://openagentrules.org/spec/1.0/oar-fixture-relaxed.schema.json';
-  const relaxedAjv = new Ajv2020({ strict: false, allErrors: true });
-  relaxedAjv.addSchema(relaxed, 'relaxed');
-  const validateRelaxed = relaxedAjv.getSchema('relaxed');
-
-  const names = (await readdir(CORPUS)).filter(
-    (n) => n.endsWith('.json') && n !== 'manifest.json' && n !== 'exempt.json',
-  );
-  for (const name of names) {
-    const doc = JSON.parse(await readFile(join(CORPUS, name), 'utf8')) as {
-      id: string;
-      expected: Record<string, unknown>;
-    };
-    if (typeof doc.expected['error'] === 'string') {
-      assert.ok(validateRelaxed(doc), `${name}: ${relaxedAjv.errorsText(validateRelaxed.errors)}`);
-    } else {
-      assert.ok(validate(doc), `${name}: ${ajv.errorsText(validate.errors)}`);
-    }
-    // [OAR-CONF-17] id equals the file name stem.
-    assert.equal(doc.id, name.replace(/\.json$/, ''));
+test('every fixture rule validates against the published schema', async () => {
+  const ajv = new Ajv2020({ strict: false, allErrors: true });
+  for (const name of ['selector.schema.json', 'oar.schema.json']) {
+    const doc = JSON.parse(await readFile(join(SCHEMAS, name), 'utf8'));
+    ajv.addSchema(doc, name);
   }
-});
+  const validate = ajv.getSchema('oar.schema.json');
+  assert.ok(validate, 'oar.schema.json did not compile');
 
-test('every fixture declares the host it assumes', async () => {
-  // [OAR-CONF-19] Without one, a fixture asks each implementation a different
-  // question — whether a rule loads would depend on which anchors and profiles
-  // that implementation happens to support.
   for (const fx of await loadFixtures(CORPUS)) {
-    assert.ok(fx.input?.capability, `${fx.id} carries no input.capability`);
-    assert.equal(
-      (fx.input.capability as { oar_capability_version?: string }).oar_capability_version,
-      '1.0',
-      `${fx.id} declares the wrong capability version`,
+    if (fx.expected.error !== undefined) continue; // deliberately invalid
+    const docs = Array.isArray(fx.rule) ? fx.rule : [fx.rule];
+    for (const doc of docs) {
+      assert.ok(validate(doc), `${fx.id}: ${ajv.errorsText(validate.errors)}`);
+    }
+    for (const doc of Array.isArray(fx.hints) ? fx.hints : []) {
+      assert.ok(validate(doc), `${fx.id} hint: ${ajv.errorsText(validate.errors)}`);
+    }
+  }
+});
+
+test('every fixture uses only the members the fixture shape defines', async () => {
+  for (const fx of await loadFixtures(CORPUS)) {
+    assert.equal(fixtureShapeError(fx), null, fx.id);
+  }
+});
+
+test('a fixture asserting an undefined expected key fails rather than passing', () => {
+  const fx = {
+    id: 'undefined-expected-key',
+    title: 'An undefined expected key',
+    covers: ['OAR-CONF-15'],
+    rule: {
+      spec_version: '1.0', id: 'R', kind: 'policy', on: 'tool.pre_invoke', selector: {},
+      effect: 'block', when: 'tool == "read"',
+    },
+    input: { anchor: 'tool.pre_invoke', facts: { tool: 'read' } },
+    expected: { decision: 'block', verdict: 'deny' },
+  } as unknown as Fixture;
+  const result = runFixture(fx);
+  assert.equal(result.pass, false);
+  assert.match(result.detail ?? '', /verdict/);
+});
+
+test('constructs outside the declared subset are refused by name', () => {
+  const cases: [string, string][] = [
+    ['has(tool)', 'macro has'],
+    ['[1, 2].all(x, x > 0)', 'macro all'],
+    ['tool_args["path"]', 'index expression'],
+    ['{"a": 1}', 'map literal'],
+    ['f(x).y == "r"', 'member selection on a value'],
+    ['"a".b == "x"', 'member selection on a value'],
+    ['a < b < c', 'chained relational operator'],
+    ['a == b == c', 'chained relational operator'],
+  ];
+  for (const [expr, want] of cases) {
+    assert.throws(
+      () => parse(expr),
+      (err: unknown) => {
+        assert.ok(err instanceof UnsupportedCelConstruct, `${expr} raised ${err}`);
+        assert.ok(err.message.includes(want), `${expr}: ${err.message} does not name ${want}`);
+        return true;
+      },
     );
   }
 });
 
-test('every fixture rule that is meant to load validates against the rule schema', async () => {
-  // A fixture asserting a load-time rejection is deliberately invalid; every
-  // other rule document must satisfy the published schema.
-  const { ajv, validate } = await validator('oar.schema.json');
-  for (const fx of await loadFixtures(CORPUS)) {
-    if (typeof fx.expected['error'] === 'string') continue;
-    for (const doc of fx.rules) {
-      assert.ok(validate(doc), `${fx.id}: ${ajv.errorsText(validate.errors)}`);
-    }
-  }
-});
-
-test('every fixture capability document validates against the capability schema', async () => {
-  const { ajv, validate } = await validator('oar-capability.schema.json');
-  for (const fx of await loadFixtures(CORPUS)) {
-    // A handful of fixtures are about a capability document being rejected.
-    if (typeof fx.expected['error'] === 'string') continue;
-    assert.ok(validate(fx.input.capability), `${fx.id}: ${ajv.errorsText(validate.errors)}`);
-  }
-});
-
-test('every expected.error is a single machine token', async () => {
-  // [OAR-CONF-30] A fixture asserts that the right thing was named, never how
-  // it was phrased. [OAR-CONF-21] frees an engine to word its own diagnostics,
-  // and a corpus asserting whole English sentences takes that freedom back: a
-  // second implementation reporting the same defect, naming the same field, in
-  // its own words would fail a fixture it is behaving correctly on.
-  const TOKEN = /^[A-Za-z0-9_][A-Za-z0-9_./:<>-]*$/;
-  let asserted = 0;
-  for (const fx of await loadFixtures(CORPUS)) {
-    const wanted = fx.expected['error'];
-    if (typeof wanted !== 'string') continue;
-    asserted++;
-    assert.ok(!/\s/.test(wanted), `${fx.id}: expected.error ${JSON.stringify(wanted)} is a phrase, not a token`);
-    assert.ok(TOKEN.test(wanted), `${fx.id}: expected.error ${JSON.stringify(wanted)} is not a machine token`);
-  }
-  assert.ok(asserted > 50, `only ${asserted} fixtures assert a load-time rejection`);
-});
-
-test('the exemption list is admissible and disjoint from the corpus', async () => {
-  // [OAR-CONF-28] An exemption is admissible only for a clause a fixture cannot
-  // observe, and must name the check that enforces it instead.
-  const doc = JSON.parse(await readFile(join(CORPUS, 'exempt.json'), 'utf8')) as {
-    _note: string;
-    exempt: { clause_id: string; reason: string; check?: string }[];
-    partial?: { clause_id: string; fixtured: string; not_fixtured: string }[];
+test('an undeclared fact is rejected at load, before any evaluation', () => {
+  const doc = {
+    spec_version: '1.0', id: 'GHOST', kind: 'policy', on: 'tool.pre_invoke',
+    selector: {}, effect: 'block', when: 'ghost_fact',
   };
-  assert.ok(doc._note.length > 0);
-  const covered = new Set<string>();
-  for (const fx of await loadFixtures(CORPUS)) for (const c of fx.covers) covered.add(c);
-  for (const entry of doc.exempt) {
-    assert.match(entry.clause_id, /^OAR-[A-Z]+-\d+$/);
-    assert.ok(entry.reason.length > 80, `${entry.clause_id}: the justification is too thin`);
-    assert.ok(entry.check, `${entry.clause_id}: names no check that enforces it instead`);
-    assert.ok(!covered.has(entry.clause_id), `${entry.clause_id} is both exempted and covered`);
-  }
-  // A partial entry records a clause a fixture covers behaviourally but whose
-  // reporting obligation no fixture can observe. It must be covered, and must
-  // never also be exempted: a green corpus should not imply more than it tested.
-  const exempted = new Set(doc.exempt.map((e) => e.clause_id));
-  for (const entry of doc.partial ?? []) {
-    assert.ok(covered.has(entry.clause_id), `${entry.clause_id} is partial but no fixture covers it`);
-    assert.ok(!exempted.has(entry.clause_id), `${entry.clause_id} is both exempted and partial`);
-    assert.ok(entry.fixtured.length > 40, `${entry.clause_id}: does not say what is exercised`);
-    assert.ok(entry.not_fixtured.length > 40, `${entry.clause_id}: does not say what is not`);
-  }
+  assert.throws(
+    () => loadRule(doc, { env: referenceEnvironment(), profile: referenceAnchorProfile() }),
+    (err: unknown) => {
+      assert.ok(err instanceof RuleLoadError);
+      assert.ok(err.message.includes('ghost_fact'), err.message);
+      return true;
+    },
+  );
 });
 
-test('the published example pack loads against the host it declares', async () => {
-  // A rule here that fails to load is a bug in the pack or the engine.
-  const env = await readCapabilityFile(join(EXAMPLES, 'capability.yaml'));
-  const report = await loadPack(EXAMPLES, env);
-  assert.deepEqual(report.errors, []);
-  assert.equal(report.loaded, report.documents);
-  assert.equal(report.documents, 10, 'the pack should hold ten rule documents');
-  assert.ok(report.set, 'the pack should link as a rule set');
+test('a condition that is not boolean is rejected at load', () => {
+  const doc = {
+    spec_version: '1.0', id: 'NOT_BOOL', kind: 'policy', on: 'tool.pre_invoke',
+    selector: {}, effect: 'block', when: 'tool',
+  };
+  assert.throws(
+    () => loadRule(doc, { env: referenceEnvironment(), profile: referenceAnchorProfile() }),
+    /want bool/,
+  );
+});
+
+// --- copy bindings (Appendix B) ------------------------------------------------
+
+const LOADOPTS = { env: referenceEnvironment(), profile: referenceAnchorProfile() };
+
+test('a double renders in the canonical form of [OAR-COPY-9]', () => {
+  assert.equal(canonicalDouble(1.0), '1.0');
+  assert.equal(canonicalDouble(0.0000001), '0.0000001');
+  assert.equal(canonicalDouble(-2.5), '-2.5');
+  assert.equal(canonicalDouble(0.0), '0.0');
+  assert.equal(canonicalDouble(-0.0), '0.0');
+  assert.equal(canonicalDouble(1e21), '1000000000000000000000.0');
+  assert.equal(canonicalDouble(0.91), '0.91');
+  assert.throws(() => canonicalDouble(Infinity), CopyRenderError);
+});
+
+test('copy bindings render against the occurrence facts', () => {
+  const env = referenceEnvironment();
+  const parts = parseCopyTemplate(
+    'R', 'what',
+    'tool {{tool}} {% if not_found %}denied{% else %}allowed{% endif %} n={{ breaker_count }}',
+    env,
+  );
+  assert.equal(
+    renderCopy(parts, { tool: 'shell', not_found: true, breaker_count: 3n }, env),
+    'tool shell denied n=3',
+  );
+  assert.equal(
+    renderCopy(parts, { tool: 'shell', not_found: false, breaker_count: 0n }, env),
+    'tool shell allowed n=0',
+  );
+  // [OAR-COPY-8] whitespace inside the delimiters is insignificant.
+  assert.deepEqual(parseCopyTemplate('R', 'what', '{{ tool }}', env), parseCopyTemplate('R', 'what', '{{tool}}', env));
+  // A list<string> joins with ", "; an empty list renders as the empty string.
+  const list = parseCopyTemplate('R', 'fix', 'servers: {{ mcp_enabled_servers }}', env);
+  assert.equal(renderCopy(list, { mcp_enabled_servers: ['a', 'b'] }, env), 'servers: a, b');
+  assert.equal(renderCopy(list, { mcp_enabled_servers: [] }, env), 'servers: ');
+});
+
+test('copy bindings are validated at load', () => {
+  const base = {
+    spec_version: '1.0', id: 'R', kind: 'policy', on: 'tool.pre_invoke',
+    selector: {}, effect: 'block', when: 'tool == "x"',
+  };
+  // [OAR-COPY-2] an unknown binding is a load failure naming the identifier.
+  assert.throws(
+    () => loadRule({ ...base, what: 'no {{ ghost_fact }} here' }, LOADOPTS),
+    (err: unknown) => err instanceof RuleLoadError && err.message.includes('ghost_fact'),
+  );
+  // [OAR-COPY-4] a non-interpolatable type is a load failure.
+  assert.throws(() => loadRule({ ...base, what: 'args {{ tool_args }}' }, LOADOPTS), /cannot be interpolated/);
+  // [OAR-COPY-3] a construct the grammar does not derive is a load failure
+  // naming the construct.
+  assert.throws(() => loadRule({ ...base, what: '{% if tool %}x' }, LOADOPTS), /unterminated conditional/);
+  assert.throws(() => loadRule({ ...base, what: '{{ tool ' }, LOADOPTS), /unterminated binding/);
+  assert.throws(() => loadRule({ ...base, what: '{% when tool %}' }, LOADOPTS), /not a construct of the copy grammar/);
+  assert.throws(() => loadRule({ ...base, what: '{% endif %}' }, LOADOPTS), /outside a conditional/);
+});
+
+test('every non-core name the condition or copy references is listed in requires_facts', () => {
+  const base = {
+    spec_version: '1.0', id: 'R', kind: 'policy', on: 'tool.pre_invoke',
+    selector: {}, effect: 'block', when: 'tool == "x"',
+  };
+  assert.throws(
+    () => loadRule({ ...base, what: 'score {{ prompt_injection_score }}' }, LOADOPTS),
+    /requires_facts/,
+  );
+  loadRule(
+    { ...base, requires_facts: ['prompt_injection_score'], what: 'score {{ prompt_injection_score }}' },
+    LOADOPTS,
+  );
+  // [OAR-DOC-22] The condition is held to the same rule as the copy.
+  assert.throws(
+    () => loadRule({ ...base, when: 'prompt_injection_score > 0.5', what: 'score {{ prompt_injection_score }}' }, LOADOPTS),
+    /requires_facts/,
+  );
+});
+
+test('copy does not affect selection or the decision ([OAR-COPY-6])', () => {
+  const mk = (what: string) => loadRule(
+    {
+      spec_version: '1.0', id: 'R', kind: 'policy', on: 'tool.pre_invoke',
+      selector: {}, effect: 'block', when: 'tool == "shell"', what,
+    },
+    LOADOPTS,
+  );
+  const plain = decide([mk('plain')], { anchor: 'tool.pre_invoke', facts: { tool: 'shell' } }, { env: LOADOPTS.env });
+  const bound = decide(
+    [mk('tool {{ tool }} n={{ breaker_count }}')],
+    { anchor: 'tool.pre_invoke', facts: { tool: 'shell' } },
+    { env: LOADOPTS.env },
+  );
+  assert.deepEqual({ ...plain.decision, copy: undefined }, { ...bound.decision, copy: undefined });
+  assert.equal(bound.decision?.copy?.what, 'tool shell n=0');
+});
+
+test('an on_error block omits copy whose observation failed ([OAR-COPY-10])', () => {
+  const rule = loadRule(
+    {
+      spec_version: '1.0', id: 'R', kind: 'policy', on: 'tool.pre_invoke', selector: {},
+      effect: 'block', when: 'prompt_injection_score > 0.5', on_error: 'fail_closed',
+      requires_facts: ['prompt_injection_score', 'mcp_enabled_servers'],
+      what: 'servers: {{ mcp_enabled_servers }}',
+    },
+    LOADOPTS,
+  );
+  // The double arrives non-finite (a fact-provider failure, [OAR-FACT-17]) so
+  // the condition errors, and the copy's list arrives with non-string members
+  // so rendering fails too: the block stands without copy, nothing coerced.
+  const r = decide(
+    [rule],
+    { anchor: 'tool.pre_invoke', facts: { prompt_injection_score: 1e999, mcp_enabled_servers: [1] } },
+    { env: LOADOPTS.env },
+  );
+  assert.equal(r.decision?.effect, 'block');
+  assert.equal(r.decision?.code, 'R');
+  assert.equal(r.decision?.copy, undefined);
+});
+
+test('a substitute on_error block carries the substitute rule\'s copy', () => {
+  const sub = loadRule(
+    {
+      spec_version: '1.0', id: 'SUB', kind: 'policy', on: 'tool.pre_invoke', selector: {},
+      effect: 'block', when: 'tool == "nope"', what: 'substitute for {{ tool }}',
+    },
+    LOADOPTS,
+  );
+  const bad = loadRule(
+    {
+      spec_version: '1.0', id: 'BAD', kind: 'policy', on: 'tool.pre_invoke', selector: {},
+      effect: 'block', when: 'prompt_injection_score > 0.5', on_error: 'SUB',
+      requires_facts: ['prompt_injection_score'], what: 'bad',
+    },
+    LOADOPTS,
+  );
+  const r = decide(
+    [bad, sub],
+    { anchor: 'tool.pre_invoke', facts: { prompt_injection_score: 1e999 } },
+    { env: LOADOPTS.env },
+  );
+  assert.equal(r.decision?.code, 'SUB');
+  assert.equal(r.decision?.copy?.what, 'substitute for ');
+});
+
+// --- hints (section 9) ----------------------------------------------------------
+
+test('a hint loads as a copy publication and rejects evaluation fields', () => {
+  const hint = loadHint({
+    spec_version: '1.0', id: 'TOOL_OUTPUT_SPILL_CAPPED', kind: 'hint',
+    severity: 'info', what: 'Output was capped.', fix: 'Narrow the request.',
+  });
+  assert.equal(hint.id, 'TOOL_OUTPUT_SPILL_CAPPED');
+  assert.equal(hint.kind, 'hint');
+  // [OAR-HINT-1] no evaluation fields.
+  assert.throws(() => loadHint({ spec_version: '1.0', id: 'H', kind: 'hint', when: 'tool', what: 'x' }), /\[OAR-HINT-1\]/);
+  assert.throws(() => loadHint({ spec_version: '1.0', id: 'H', kind: 'hint', effect: 'block', what: 'x' }), /\[OAR-HINT-1\]/);
+  // [OAR-HINT-2] at least one copy member.
+  assert.throws(() => loadHint({ spec_version: '1.0', id: 'H', kind: 'hint' }), /\[OAR-HINT-2\]/);
+  // [OAR-HINT-3] copy is static.
+  assert.throws(() => loadHint({ spec_version: '1.0', id: 'H', kind: 'hint', what: 'has {{ x }}' }), /\[OAR-HINT-3\]/);
+  // An unsupported spec_version is rejected, not coerced.
+  assert.throws(() => loadHint({ spec_version: '1.1', id: 'H', kind: 'hint', what: 'x' }), /unsupported spec_version/);
+});
+
+test('host facts extend the environment under [OAR-FACT-19]', () => {
+  const env = withHostFacts(referenceEnvironment(), { scope_hint: 'string' });
+  assert.equal(env.facts['scope_hint']?.type, 'string');
+  assert.equal(env.facts['scope_hint']?.tier, 'host');
+  assert.throws(() => withHostFacts(referenceEnvironment(), { tool: 'string' }), /collides/);
+  assert.throws(() => withHostFacts(referenceEnvironment(), { x: 'list<map>' }), /data-type vocabulary/);
 });

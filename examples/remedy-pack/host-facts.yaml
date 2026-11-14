@@ -1,0 +1,9 @@
+# The host-tier facts this pack assumes, in the catalog form the host keeps.
+# This file is a host-side convention, not a rule document: the format's only
+# contact with it is [OAR-FACT-15] (host facts are published under a namespace
+# the host owns) and the fixture input's host_facts member ([OAR-CONF-13]).
+# A host that does not publish these facts simply does not run the rules that
+# name them — see README.md for the fallback chain.
+example.attempts: int
+example.breaker_open: bool
+example.redaction_count: int

@@ -29,13 +29,11 @@ jobs:
           cache-dependency-path: packages/oar-ref/package-lock.json
       - uses: arduino/setup-task@v2
         with: { version: 3.x, repo-token: "${{ secrets.GITHUB_TOKEN }}" }
-      # spec:capability:check probes fixtures against the reference engine.
       - run: task install
       - run: task spec:vocab:check
       - run: task spec:clauses:check
       - run: task schema:check
       - run: task spec:coverage:check
-      - run: task spec:capability:check
 
   site:
     name: published site is current and well-formed

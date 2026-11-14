@@ -1,34 +1,22 @@
-// Loading is where a bad rule is caught. The version gate, the closed document
-// world, anchor resolution, capability negotiation, the selector clauses, and a
-// full type check of the condition against the declared environment all happen
-// here, before any occurrence is evaluated.
-//
-// [OAR-OPS-3] Malformed documents, unknown identifiers, and type errors are not
-// routed through `on_error`. They are load-time rejections, and an engine that
-// silently downgraded one would enforce a policy the author never wrote.
+// Loading is where a bad rule is caught. Structural checks, the version gate,
+// requires_facts, and a full type check of the condition against the declared
+// environment all happen here, before any occurrence is evaluated — so a
+// mistyped fact name can never become a run-time default.
 
-import { check, ConditionTypeError } from './check.js';
-import { CopyLoadError, INTERPOLATABLE, parseCopy } from './copy.js';
-import { countNodes, parse, type Node } from './parse.js';
-import type { Environment } from './capability.js';
+import { parse, type BinaryOp, type Node } from './parse.js';
 import {
-  COUNTER_READERS,
-  EFFECTS,
-  ENFORCEMENTS,
-  KINDS,
-  ON_FIRE_ACTIONS,
-  OAR_MAJOR,
-  OAR_MINOR,
-  PROFILES,
-  RELATED_TYPES,
-  STATUSES,
-  TRANSFORM_ACTIONS,
-  isCoreAnchor,
-  type Effect,
-  type Enforcement,
-  type Kind,
-  type OnFireAction,
-} from './vocab.js';
+  BUILTINS,
+  CORE_ANCHORS,
+  type AnchorProfile,
+  type CelType,
+  type Environment,
+} from './env.js';
+import {
+  COPY_MEMBERS,
+  copyReferences,
+  parseCopyTemplate,
+  type CopyPart,
+} from './copy.js';
 
 export class RuleLoadError extends Error {
   constructor(message: string) {
@@ -37,794 +25,608 @@ export class RuleLoadError extends Error {
   }
 }
 
-const ID_RE = /^[A-Z][A-Z0-9_]*$/;
-const NAMESPACE_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
-const ANCHOR_RE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/;
-const FACT_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
-const QUALIFIED_REF_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\/[A-Z][A-Z0-9_]*$/;
-const EXTENSION_RE = /^x-[a-z0-9]+(-[a-z0-9]+)*$/;
-const DETECTOR_RE = /^detector:\/\/[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+export const SUPPORTED_SPEC_VERSIONS = ['1.0'] as const;
+// The version this engine implements: it accepts its major at any minor up to
+// its own ([OAR-DOC-3]).
+const IMPLEMENTED = { major: 1, minor: 0 };
+const VERSION_RE = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 
-const DEFINED_FIELDS = new Set([
-  'oar',
-  'id',
-  'namespace',
-  'kind',
-  'anchor',
-  'selector',
-  'when',
-  'flow',
-  'effect',
-  'enforcement',
-  'mandatory',
-  'on_error',
-  'on_fire',
-  'counter_scope',
-  'overrides',
-  'requires',
-  'transform',
-  'detector',
-  'copy',
-  'references',
-  'status',
-  'related',
+/** [OAR-DOC-3] The version gate, applied before anything else ([OAR-CONF-2]). */
+function checkVersion(specVersion: string): void {
+  const m = VERSION_RE.exec(specVersion);
+  if (!m) throw new RuleLoadError(`spec_version ${JSON.stringify(specVersion)} is not <major>.<minor>`);
+  if (Number(m[1]) !== IMPLEMENTED.major || Number(m[2]) > IMPLEMENTED.minor) {
+    throw new RuleLoadError(
+      `unsupported spec_version ${JSON.stringify(specVersion)} (this engine implements ${IMPLEMENTED.major}.${IMPLEMENTED.minor})`,
+    );
+  }
+}
+
+export type Kind = 'schema' | 'policy' | 'invariant' | 'detector';
+export type Effect = 'block' | 'warn' | 'nudge' | 'allow';
+export type OnFireAction =
+  | 'increment_counter' | 'reset_counter' | 'publish_event'
+  | 'increment_breaker' | 'reset_breaker';
+
+const KINDS: readonly Kind[] = ['schema', 'policy', 'invariant', 'detector'];
+const EFFECTS: readonly Effect[] = ['block', 'warn', 'nudge', 'allow'];
+const ON_FIRE: readonly OnFireAction[] = [
+  'increment_counter', 'reset_counter', 'publish_event',
+  'increment_breaker', 'reset_breaker',
+];
+
+export interface Selector {
+  tools?: string[];
+}
+
+// Every field the document model defines. Anything else that is not an x-
+// extension is rejected.
+const DOCUMENT_FIELDS = new Set([
+  'spec_version', 'id', 'namespace', 'title', 'kind', 'severity', 'on', 'selector',
+  'when', 'flow', 'effect', 'enforcement', 'mandatory', 'on_error', 'on_fire',
+  'stream', 'references', 'detector', 'requires_facts', 'profile',
+  'what', 'cause', 'why', 'fix', 'instead', 'message',
 ]);
 
-const COPY_MEMBERS = new Set(['title', 'what', 'cause', 'why', 'fix', 'instead']);
+const NAMESPACE_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
+const ID_RE = /^[A-Z][A-Z0-9_]*$/;
+// [OAR-DOC-19] The only names outside the document model a document may carry.
+const EXTENSION_RE = /^x-[a-z0-9]+(-[a-z0-9]+)*$/;
 
-export interface SelectorClause {
-  readonly fact: string;
-  readonly values: readonly string[];
+export interface Rule {
+  specVersion: string;
+  id: string;
+  namespace: string;
+  kind: Kind;
+  on: string;
+  resolvedOn: string;
+  selector: Selector;
+  when: string;
+  ast: Node | null;
+  flow: string[];
+  effect: Effect;
+  enforcement: 'enforce' | 'monitor';
+  mandatory: boolean;
+  onError: string;
+  onFire: OnFireAction[];
+  detectorRef: string | null;
+  /** Parsed copy members ([OAR-DOC-18], Appendix B). Empty when none. */
+  copy: Readonly<Record<string, readonly CopyPart[]>>;
+  /** Rule ids named by fire_count_of / breaker_count_of, resolved over the rule set. */
+  counterRefs: readonly string[];
 }
 
-export interface TransformSpec {
-  readonly action: 'redact' | 'replace' | 'annotate';
-  readonly target: string;
-  readonly replacement?: string;
+/** Identity is the (namespace, id) pair; the rendered code stays the bare id. */
+export function identity(rule: Rule): string {
+  return rule.namespace ? `${rule.namespace}/${rule.id}` : rule.id;
 }
 
-export interface RelatedEntry {
-  readonly id: string;
-  readonly type: string;
+export interface LoadOptions {
+  env: Environment;
+  profile: AnchorProfile;
+  /** Detector references this host can resolve. */
+  detectors?: readonly string[];
 }
 
-/**
- * [OAR-FIRE-11] One `fire_count_of` or `breaker_count_of` call in a condition:
- * the built-in that read it, the literal the author wrote, and the qualified
- * identifier that literal resolves to in the referencing rule's namespace.
- */
-export interface CounterRef {
-  readonly fn: string;
-  readonly counter: 'fire_count' | 'breaker_count';
-  readonly literal: string;
-  readonly target: string;
-}
-
-export interface LoadedRule {
-  readonly id: string;
-  readonly namespace: string;
-  /** [OAR-DOC-8] The identity of a rule: <namespace>/<id>, or the bare id in the host's own scope. */
-  readonly qualified: string;
-  readonly kind: Kind;
-  readonly anchor: string;
-  /** [OAR-PROF-4] The local anchor a core anchor resolves to through the profile map. */
-  readonly resolvedAnchor: string;
-  readonly selector: readonly SelectorClause[];
-  readonly whenSource?: string;
-  readonly when: Node | null;
-  readonly flow: readonly string[];
-  readonly hasFlow: boolean;
-  readonly effect: Effect;
-  readonly enforcement: Enforcement;
-  readonly mandatory: boolean;
-  readonly onError: string;
-  readonly onFire: readonly OnFireAction[];
-  /** [OAR-DOC-32], [OAR-FIRE-10] The declared string fact whose value keys this rule's counters. */
-  readonly counterScope?: string;
-  /** [OAR-FIRE-11] The counters of other rules this rule's condition reads. */
-  readonly counterRefs: readonly CounterRef[];
-  readonly overrides: readonly string[];
-  readonly requiresProfiles: readonly string[];
-  readonly requiresFacts: readonly string[];
-  readonly transform?: TransformSpec;
-  readonly detectorRef?: string;
-  readonly copy: Readonly<Record<string, string>>;
-  readonly status: string;
-  readonly related: readonly RelatedEntry[];
-  /** Fact and function names the condition, selector, transform, and copy reference. */
-  readonly refs: ReadonlySet<string>;
-  readonly warnings: readonly string[];
-}
-
-function isObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-function stringList(v: unknown, field: string): string[] {
-  if (!Array.isArray(v)) throw new RuleLoadError(`field ${JSON.stringify(field)} must be a list of strings`);
-  return v.map((x) => {
-    if (typeof x !== 'string') throw new RuleLoadError(`field ${JSON.stringify(field)} must be a list of strings`);
-    return x;
-  });
-}
-
-/** Visit every node of a parse tree, in no particular order. */
-function walkNodes(node: Node, visit: (n: Node) => void): void {
-  visit(node);
-  switch (node.kind) {
-    case 'list':
-      for (const item of node.items) walkNodes(item, visit);
-      return;
-    case 'call':
-      for (const arg of node.args) walkNodes(arg, visit);
-      return;
-    case 'index':
-      walkNodes(node.target, visit);
-      walkNodes(node.index, visit);
-      return;
-    case 'unary':
-      walkNodes(node.operand, visit);
-      return;
-    case 'binary':
-      walkNodes(node.left, visit);
-      walkNodes(node.right, visit);
-      return;
-    case 'ternary':
-      walkNodes(node.cond, visit);
-      walkNodes(node.then, visit);
-      walkNodes(node.other, visit);
-      return;
-    default:
-      return;
+export function loadRule(doc: unknown, opts: LoadOptions): Rule {
+  if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) {
+    throw new RuleLoadError('rule document must be a JSON object');
   }
-}
+  const d = doc as Record<string, unknown>;
 
-/** Resolve a bare or qualified rule reference within a referring namespace. */
-export function resolveRef(ref: string, namespace: string): string {
-  if (ref.includes('/')) return ref;
-  return namespace === '' ? ref : `${namespace}/${ref}`;
-}
+  checkVersion(requireString(d, 'spec_version'));
+  const specVersion = d['spec_version'] as string;
 
-/**
- * Load one rule document against a declared environment. Every rejection names
- * the field, identifier, or capability at fault.
- */
-export function loadRuleDocument(doc: unknown, env: Environment): LoadedRule {
-  if (!isObject(doc)) throw new RuleLoadError('[OAR-DOC-31] a rule set member is not a rule document: expected a JSON object');
-
-  // [OAR-CONF-2] Check `oar` before any other processing of the document.
-  const oar = doc['oar'];
-  if (oar === undefined) throw new RuleLoadError('rule document is missing required field "oar"');
-  // [OAR-DOC-3] Each part is a decimal integer with no leading zero: two
-  // engines free to disagree about whether "01.0" equals "1.0" would disagree
-  // about which documents load.
-  if (typeof oar !== 'string' || !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(oar)) {
-    throw new RuleLoadError('field "oar" must be a version string of the form <major>.<minor>, each part without a leading zero');
-  }
-  const [majorText, minorText] = oar.split('.') as [string, string];
-  const major = Number(majorText);
-  const minor = Number(minorText);
-  if (major !== OAR_MAJOR) {
-    // [OAR-DOC-4] An unsupported major is refused, never downgraded or coerced.
-    throw new RuleLoadError(
-      `[OAR-DOC-4] oar ${oar} names a major version this engine does not implement (${OAR_MAJOR}.${OAR_MINOR})`,
-    );
-  }
-  if (minor > OAR_MINOR) {
-    // [OAR-DOC-5] A greater minor may narrow the rule with a field this engine
-    // would ignore, so refusing to load is the only visible failure mode.
-    throw new RuleLoadError(
-      `[OAR-DOC-5] oar ${oar} names a minor version above this engine's own (${OAR_MAJOR}.${OAR_MINOR})`,
-    );
-  }
-
-  // [OAR-DOC-27] The document world is closed: a field this specification does
-  // not define is a rejection, naming the field. A typo that silently does
-  // nothing is how a guardrail becomes a placebo.
-  for (const key of Object.keys(doc)) {
-    if (DEFINED_FIELDS.has(key)) continue;
-    // [OAR-DOC-26] An unrecognised x- extension is ignored.
+  for (const key of Object.keys(d)) {
     if (EXTENSION_RE.test(key)) continue;
-    throw new RuleLoadError(`[OAR-DOC-27] rule document carries undefined field ${JSON.stringify(key)}`);
-  }
-
-  // [OAR-DOC-2] The five obligatory fields.
-  for (const required of ['id', 'kind', 'anchor', 'effect']) {
-    if (doc[required] === undefined) {
-      throw new RuleLoadError(`[OAR-DOC-2] rule document is missing required field ${JSON.stringify(required)}`);
+    if (!DOCUMENT_FIELDS.has(key)) {
+      throw new RuleLoadError(`rule carries undefined field ${JSON.stringify(key)}`);
     }
   }
 
-  const id = doc['id'];
-  if (typeof id !== 'string' || !ID_RE.test(id)) {
-    throw new RuleLoadError(`[OAR-DOC-6] field "id" does not match ^[A-Z][A-Z0-9_]*$: ${JSON.stringify(id)}`);
+  const id = requireString(d, 'id');
+  if (!ID_RE.test(id)) {
+    throw new RuleLoadError(`id ${JSON.stringify(id)} does not match ${ID_RE.source}`);
+  }
+  const namespace = typeof d['namespace'] === 'string' ? d['namespace'] : '';
+  if (namespace && !NAMESPACE_RE.test(namespace)) {
+    throw new RuleLoadError(`rule ${id} has an invalid namespace ${JSON.stringify(namespace)}`);
   }
 
-  const namespaceRaw = doc['namespace'];
-  if (namespaceRaw !== undefined && (typeof namespaceRaw !== 'string' || !NAMESPACE_RE.test(namespaceRaw))) {
-    throw new RuleLoadError(`field "namespace" is not a publisher scope: ${JSON.stringify(namespaceRaw)}`);
+  const kind = requireString(d, 'kind') as Kind;
+  if (!KINDS.includes(kind)) {
+    throw new RuleLoadError(`rule ${id} has kind ${JSON.stringify(kind)}, want one of ${KINDS.join(', ')}`);
   }
-  const namespace = typeof namespaceRaw === 'string' ? namespaceRaw : '';
-  const qualified = namespace === '' ? id : `${namespace}/${id}`;
-
-  const kind = doc['kind'];
-  if (typeof kind !== 'string' || !(KINDS as readonly string[]).includes(kind)) {
-    throw new RuleLoadError(`[OAR-DOC-10] field "kind" is ${JSON.stringify(kind)}, not one of ${KINDS.join(', ')}`);
+  const effect = requireString(d, 'effect') as Effect;
+  if (!EFFECTS.includes(effect)) {
+    throw new RuleLoadError(`rule ${id} has effect ${JSON.stringify(effect)}, want one of ${EFFECTS.join(', ')}`);
   }
-
-  const effect = doc['effect'];
-  if (typeof effect !== 'string' || !(EFFECTS as readonly string[]).includes(effect)) {
-    throw new RuleLoadError(`[OAR-DOC-11] field "effect" is ${JSON.stringify(effect)}, not one of ${EFFECTS.join(', ')}`);
+  if (d['severity'] !== undefined &&
+      !['block', 'warn', 'info'].includes(String(d['severity']))) {
+    throw new RuleLoadError(`rule ${id} has severity ${JSON.stringify(d['severity'])}`);
   }
-
-  const anchorRaw = doc['anchor'];
-  if (typeof anchorRaw !== 'string' || !ANCHOR_RE.test(anchorRaw)) {
-    throw new RuleLoadError('field "anchor" must name exactly one lifecycle moment');
+  if (d['profile'] !== undefined && !['portable', 'host'].includes(String(d['profile']))) {
+    throw new RuleLoadError(`rule ${id} has profile ${JSON.stringify(d['profile'])}, want portable or host`);
   }
 
-  const enforcementRaw = doc['enforcement'] ?? 'enforce';
-  if (typeof enforcementRaw !== 'string' || !(ENFORCEMENTS as readonly string[]).includes(enforcementRaw)) {
-    throw new RuleLoadError(`field "enforcement" must be one of ${ENFORCEMENTS.join(', ')}`);
+  const on = requireString(d, 'on');
+  const resolvedOn = resolveAnchor(id, on, opts.profile);
+
+  if (d['selector'] === undefined) {
+    throw new RuleLoadError(`rule ${id} is missing selector`);
   }
-  const enforcement = enforcementRaw as Enforcement;
+  const selector = readSelector(id, d['selector']);
 
-  const mandatoryRaw = doc['mandatory'] ?? false;
-  if (typeof mandatoryRaw !== 'boolean') throw new RuleLoadError('field "mandatory" must be a boolean');
+  const enforcement = (d['enforcement'] ?? 'enforce') as 'enforce' | 'monitor';
+  if (enforcement !== 'enforce' && enforcement !== 'monitor') {
+    throw new RuleLoadError(`rule ${id} has enforcement ${JSON.stringify(enforcement)}`);
+  }
+  if (d['mandatory'] !== undefined && typeof d['mandatory'] !== 'boolean') {
+    throw new RuleLoadError(`rule ${id} has mandatory ${JSON.stringify(d['mandatory'])}, want a boolean`);
+  }
+  if (d['mandatory'] === true && enforcement === 'monitor') {
+    // [OAR-OPS-9] A rule cannot be both required and not enforced.
+    throw new RuleLoadError(`rule ${id} is mandatory and cannot have enforcement monitor`);
+  }
+  const stream = String(d['stream'] ?? 'buffered');
+  if (stream === 'chunk') {
+    throw new RuleLoadError(`rule ${id} requests stream: chunk, which this engine does not implement`);
+  }
+  if (stream !== 'buffered') {
+    throw new RuleLoadError(`rule ${id} has stream ${JSON.stringify(stream)}`);
+  }
 
-  const onErrorRaw = doc['on_error'] ?? 'fail_closed';
-  if (typeof onErrorRaw !== 'string') throw new RuleLoadError('field "on_error" must be a string');
-  if (
-    onErrorRaw !== 'fail_closed' &&
-    onErrorRaw !== 'fail_open' &&
-    !ID_RE.test(onErrorRaw) &&
-    !QUALIFIED_REF_RE.test(onErrorRaw)
-  ) {
+  const onFire: OnFireAction[] = [];
+  for (const raw of asArray(d['on_fire'])) {
+    const action = String(raw) as OnFireAction;
+    if (!ON_FIRE.includes(action)) {
+      throw new RuleLoadError(`rule ${id} declares on_fire ${JSON.stringify(action)}, which is outside the closed vocabulary`);
+    }
+    onFire.push(action);
+  }
+
+  let detectorRef: string | null = null;
+  if (kind === 'detector') {
+    const det = d['detector'];
+    if (typeof det !== 'object' || det === null || typeof (det as Record<string, unknown>)['ref'] !== 'string') {
+      throw new RuleLoadError(`rule ${id} has kind detector and must carry detector.ref`);
+    }
+    detectorRef = String((det as Record<string, unknown>)['ref']);
+    if (!detectorRef.startsWith('detector://')) {
+      throw new RuleLoadError(`rule ${id} detector.ref ${JSON.stringify(detectorRef)} is not a detector:// URI`);
+    }
+    if (opts.detectors && !opts.detectors.includes(detectorRef)) {
+      throw new RuleLoadError(`rule ${id} names detector ${detectorRef}, which this engine cannot resolve`);
+    }
+  } else if (d['detector'] !== undefined) {
+    throw new RuleLoadError(`rule ${id} carries detector but its kind is ${kind}`);
+  }
+
+  for (const raw of asArray(d['requires_facts'])) {
+    const name = String(raw);
+    if (!(name in opts.env.facts) && !(name in opts.env.functions)) {
+      throw new RuleLoadError(`rule ${JSON.stringify(id)} requires fact ${JSON.stringify(name)}, which this host does not provide`);
+    }
+  }
+
+  const when = typeof d['when'] === 'string' ? d['when'] : '';
+  let ast: Node | null = null;
+  if (when.trim() !== '') {
+    ast = parse(when);
+    const t = checkType(ast, opts.env, id);
+    if (t !== 'bool') {
+      throw new RuleLoadError(`rule ${id} condition evaluates to ${t}, want bool`);
+    }
+  }
+
+  const copy: Record<string, readonly CopyPart[]> = {};
+  for (const member of COPY_MEMBERS) {
+    const raw = d[member];
+    if (raw === undefined) continue;
+    if (typeof raw !== 'string') {
+      throw new RuleLoadError(`rule ${id} copy member ${member} must be a string`);
+    }
+    copy[member] = parseCopyTemplate(id, member, raw, opts.env);
+  }
+  // [OAR-DOC-22], [OAR-COPY-5] Every non-core name the condition or the copy
+  // references is listed in requires_facts, so portability reads off the document.
+  const refs = new Set<string>();
+  if (ast) conditionIdents(ast, refs, opts.env);
+  for (const name of copyReferences(Object.values(copy).flat())) refs.add(name);
+  const requiresNames = new Set(asArray(d['requires_facts']).map(String));
+  for (const name of refs) {
+    const tier = opts.env.facts[name]?.tier ?? opts.env.functions[name]?.tier;
+    if (tier === undefined || tier === 'core' || requiresNames.has(name)) continue;
     throw new RuleLoadError(
-      `field "on_error" must be fail_closed, fail_open, or a rule identifier, got ${JSON.stringify(onErrorRaw)}`,
+      `rule ${id} references ${name}, which is not a core fact and is not listed in requires_facts`,
     );
   }
+  const counterRefs: string[] = [];
+  if (ast) counterCalls(ast, counterRefs);
 
-  const onFireRaw = doc['on_fire'] ?? [];
-  const onFire: OnFireAction[] = [];
-  for (const action of stringList(onFireRaw, 'on_fire')) {
-    if (!(ON_FIRE_ACTIONS as readonly string[]).includes(action)) {
-      // [OAR-FIRE-1] The side-effect vocabulary is closed.
-      throw new RuleLoadError(`[OAR-FIRE-1] field "on_fire" names undefined side-effect ${JSON.stringify(action)}`);
+  return {
+    specVersion, id, namespace, kind, on, resolvedOn, selector, when, ast,
+    flow: asArray(d['flow']).map(String),
+    effect, enforcement,
+    mandatory: d['mandatory'] === true,
+    onError: typeof d['on_error'] === 'string' ? d['on_error'] : 'fail_closed',
+    onFire, detectorRef, copy, counterRefs,
+  };
+}
+
+/** The rule ids a condition passes to fire_count_of and breaker_count_of. */
+function counterCalls(node: Node, out: string[]): void {
+  switch (node.kind) {
+    case 'call':
+      if (COUNTER_FUNCTIONS.has(node.name) && node.args[0]?.kind === 'string') out.push(node.args[0].value);
+      for (const arg of node.args) counterCalls(arg, out);
+      break;
+    case 'list': for (const item of node.items) counterCalls(item, out); break;
+    case 'unary': counterCalls(node.operand, out); break;
+    case 'ternary': counterCalls(node.cond, out); counterCalls(node.then, out); counterCalls(node.other, out); break;
+    case 'binary': counterCalls(node.left, out); counterCalls(node.right, out); break;
+    default: break;
+  }
+}
+
+const COUNTER_FUNCTIONS = new Set(['fire_count_of', 'breaker_count_of']);
+
+export interface RuleSet {
+  rules: Rule[];
+  hints: Hint[];
+}
+
+/**
+ * Load a rule set ([OAR-DOC-27]): each document on its own, then the checks
+ * that span documents — unique identities, on_error substitutes, counter
+ * references, and unique hint codes.
+ */
+export function loadRuleSet(ruleDocs: readonly unknown[], hintDocs: readonly unknown[], opts: LoadOptions): RuleSet {
+  const rules = ruleDocs.map((doc) => loadRule(doc, opts));
+  const hints = hintDocs.map((doc) => loadHint(doc));
+  const seen = new Set<string>();
+  for (const rule of rules) {
+    const key = identity(rule);
+    if (seen.has(key)) throw new RuleLoadError(`rule set holds two rules with identity ${key} [OAR-DOC-28]`);
+    seen.add(key);
+  }
+  const inNamespace = (namespace: string, id: string) =>
+    rules.some((r) => r.namespace === namespace && r.id === id);
+  for (const rule of rules) {
+    if (rule.onError !== 'fail_closed' && rule.onError !== 'fail_open' && !inNamespace(rule.namespace, rule.onError)) {
+      throw new RuleLoadError(`rule ${identity(rule)} on_error names ${rule.onError}, which is not a rule of its namespace in the rule set [OAR-OPS-4]`);
     }
-    onFire.push(action as OnFireAction);
+    for (const ref of rule.counterRefs) {
+      if (!inNamespace(rule.namespace, ref)) {
+        throw new RuleLoadError(`rule ${identity(rule)} reads the counters of ${ref}, which is not a rule of its namespace in the rule set [OAR-FIRE-6]`);
+      }
+    }
+  }
+  const codes = new Set<string>();
+  for (const hint of hints) {
+    if (codes.has(hint.id)) throw new RuleLoadError(`rule set holds two hints with code ${hint.id} [OAR-HINT-2]`);
+    codes.add(hint.id);
+  }
+  return { rules, hints };
+}
+
+/** Every fact and function name a condition references, for [OAR-DOC-22]. */
+function conditionIdents(node: Node, out: Set<string>, env: Environment): void {
+  switch (node.kind) {
+    case 'ident':
+      // A declared name is the reference; otherwise the map a member is selected from.
+      out.add(env.facts[node.name] ? node.name : node.name.slice(0, node.name.lastIndexOf('.')));
+      break;
+    case 'list': for (const item of node.items) conditionIdents(item, out, env); break;
+    case 'unary': conditionIdents(node.operand, out, env); break;
+    case 'ternary':
+      conditionIdents(node.cond, out, env);
+      conditionIdents(node.then, out, env);
+      conditionIdents(node.other, out, env);
+      break;
+    case 'binary':
+      conditionIdents(node.left, out, env);
+      conditionIdents(node.right, out, env);
+      break;
+    case 'call':
+      out.add(node.name);
+      for (const arg of node.args) conditionIdents(arg, out, env);
+      break;
+    default: break;
+  }
+}
+
+// --- hints (section 9) ---------------------------------------------------------
+
+// The fields a hint document may carry: the document envelope, the presentation
+// fields, and the copy members. Everything evaluation-shaped is forbidden.
+const HINT_FIELDS = new Set([
+  'spec_version', 'id', 'namespace', 'title', 'kind', 'severity',
+  'references', 'what', 'cause', 'why', 'fix', 'instead', 'message',
+]);
+
+// The evaluation fields [OAR-HINT-1] forbids — named individually so the load
+// error can distinguish "a hint must not evaluate" from "no such field".
+const HINT_EVALUATION_FIELDS = new Set([
+  'on', 'selector', 'effect', 'when', 'flow', 'enforcement', 'mandatory',
+  'on_error', 'on_fire', 'stream', 'detector', 'requires_facts', 'profile',
+]);
+
+export interface Hint {
+  specVersion: string;
+  id: string;
+  namespace: string;
+  kind: 'hint';
+  copy: Readonly<Record<string, string>>;
+}
+
+/**
+ * Loads a hint document (section 9). A hint is a copy publication keyed by
+ * code: it carries no evaluation fields ([OAR-HINT-1]), at least one copy
+ * member ([OAR-HINT-2]), and copy that is static — no bindings, no
+ * conditionals ([OAR-HINT-3]).
+ */
+export function loadHint(doc: unknown): Hint {
+  if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) {
+    throw new RuleLoadError('hint document must be a JSON object');
+  }
+  const d = doc as Record<string, unknown>;
+
+  checkVersion(requireString(d, 'spec_version'));
+  const specVersion = d['spec_version'] as string;
+
+  for (const key of Object.keys(d)) {
+    if (EXTENSION_RE.test(key)) continue;
+    if (!HINT_FIELDS.has(key)) {
+      if (HINT_EVALUATION_FIELDS.has(key)) {
+        throw new RuleLoadError(
+          `hint carries evaluation field ${JSON.stringify(key)} — a hint publishes copy, it does not evaluate ([OAR-HINT-1])`,
+        );
+      }
+      throw new RuleLoadError(
+        `hint carries field ${JSON.stringify(key)}, which this specification does not define ([OAR-DOC-19], [OAR-HINT-5])`,
+      );
+    }
   }
 
-  const overrides = stringList(doc['overrides'] ?? [], 'overrides');
-  for (const ref of overrides) {
-    if (!ID_RE.test(ref) && !QUALIFIED_REF_RE.test(ref)) {
-      throw new RuleLoadError(`field "overrides" holds malformed rule reference ${JSON.stringify(ref)}`);
-    }
+  const id = requireString(d, 'id');
+  if (!ID_RE.test(id)) {
+    throw new RuleLoadError(`hint id ${JSON.stringify(id)} is not an identifier`);
   }
-
-  const statusRaw = doc['status'] ?? 'stable';
-  if (typeof statusRaw !== 'string' || !(STATUSES as readonly string[]).includes(statusRaw)) {
-    throw new RuleLoadError(`field "status" must be one of ${STATUSES.join(', ')}`);
+  if (d['kind'] !== 'hint') {
+    throw new RuleLoadError(`hint ${id} carries kind ${JSON.stringify(d['kind'])}, want "hint"`);
   }
-
-  const related: RelatedEntry[] = [];
-  const relatedRaw = doc['related'] ?? [];
-  if (!Array.isArray(relatedRaw)) throw new RuleLoadError('field "related" must be a list');
-  for (const entry of relatedRaw) {
-    if (!isObject(entry)) throw new RuleLoadError('field "related" holds a non-object');
-    for (const key of Object.keys(entry)) {
-      if (key !== 'id' && key !== 'type') throw new RuleLoadError(`field "related" carries undefined member ${JSON.stringify(key)}`);
-    }
-    const rid = entry['id'];
-    const rtype = entry['type'];
-    if (typeof rid !== 'string' || (!ID_RE.test(rid) && !QUALIFIED_REF_RE.test(rid))) {
-      throw new RuleLoadError(`field "related" holds malformed rule reference ${JSON.stringify(rid)}`);
-    }
-    if (typeof rtype !== 'string' || !(RELATED_TYPES as readonly string[]).includes(rtype)) {
-      throw new RuleLoadError(`field "related" type must be one of ${RELATED_TYPES.join(', ')}`);
-    }
-    related.push({ id: rid, type: rtype });
+  const namespace = typeof d['namespace'] === 'string' ? d['namespace'] : '';
+  if (namespace !== '' && !NAMESPACE_RE.test(namespace)) {
+    throw new RuleLoadError(`hint ${id} namespace ${JSON.stringify(namespace)} is not a namespace`);
+  }
+  if (d['severity'] !== undefined &&
+      !['block', 'warn', 'info'].includes(String(d['severity']))) {
+    throw new RuleLoadError(`hint ${id} has severity ${JSON.stringify(d['severity'])}`);
   }
 
   const copy: Record<string, string> = {};
-  const copyRaw = doc['copy'];
-  if (copyRaw !== undefined) {
-    if (!isObject(copyRaw)) throw new RuleLoadError('field "copy" must be an object');
-    for (const [key, value] of Object.entries(copyRaw)) {
-      // [OAR-DOC-24] copy carries a closed set of presentation strings.
-      if (!COPY_MEMBERS.has(key)) throw new RuleLoadError(`[OAR-DOC-24] field "copy" carries undefined member ${JSON.stringify(key)}`);
-      if (typeof value !== 'string') throw new RuleLoadError(`field "copy.${key}" must be a string`);
-      copy[key] = value;
+  let members = 0;
+  for (const member of COPY_MEMBERS) {
+    const raw = d[member];
+    if (raw === undefined) continue;
+    if (typeof raw !== 'string') {
+      throw new RuleLoadError(`hint ${id} copy member ${member} must be a string`);
     }
-  }
-
-  const referencesRaw = doc['references'];
-  if (referencesRaw !== undefined) {
-    if (!isObject(referencesRaw)) throw new RuleLoadError('field "references" must be an object');
-    for (const [key, value] of Object.entries(referencesRaw)) stringList(value, `references.${key}`);
-  }
-
-  // [OAR-DOC-23] detector is present if and only if kind is detector.
-  const detectorRaw = doc['detector'];
-  let detectorRef: string | undefined;
-  if (kind === 'detector') {
-    if (!isObject(detectorRaw)) throw new RuleLoadError(`[OAR-DOC-23] rule ${qualified} has kind detector and must carry "detector"`);
-    for (const key of Object.keys(detectorRaw)) {
-      if (key !== 'ref') throw new RuleLoadError(`field "detector" carries undefined member ${JSON.stringify(key)}`);
-    }
-    const ref = detectorRaw['ref'];
-    if (typeof ref !== 'string' || !DETECTOR_RE.test(ref)) {
-      throw new RuleLoadError('field "detector.ref" must be a detector:// reference');
-    }
-    // [OAR-OPS-12] A reference the engine cannot resolve to a registered
-    // detector is a load-time rejection.
-    if (!env.detectors.has(ref)) {
-      throw new RuleLoadError(`[OAR-OPS-12] rule ${qualified} references detector ${ref}, which is not registered`);
-    }
-    detectorRef = ref;
-  } else if (detectorRaw !== undefined) {
-    throw new RuleLoadError(`[OAR-DOC-23] rule ${qualified} has kind ${kind} and must not carry "detector"`);
-  }
-
-  // [OAR-DOC-22] transform is present if and only if effect is transform.
-  const transformRaw = doc['transform'];
-  let transform: TransformSpec | undefined;
-  if (effect === 'transform') {
-    // [OAR-OPS-18] An engine that does not implement content mutation refuses
-    // the rule rather than treating it as a block or ignoring it.
-    if (!env.supportsTransform) {
-      throw new RuleLoadError(`[OAR-OPS-18] rule ${qualified} has effect transform, and this engine declares supports_transform false`);
-    }
-    if (!isObject(transformRaw)) throw new RuleLoadError(`[OAR-DOC-22] rule ${qualified} has effect transform and must carry "transform"`);
-    for (const key of Object.keys(transformRaw)) {
-      if (key !== 'action' && key !== 'target' && key !== 'replacement') {
-        throw new RuleLoadError(`field "transform" carries undefined member ${JSON.stringify(key)}`);
-      }
-    }
-    const action = transformRaw['action'];
-    const target = transformRaw['target'];
-    const replacement = transformRaw['replacement'];
-    if (typeof action !== 'string' || !(TRANSFORM_ACTIONS as readonly string[]).includes(action)) {
-      throw new RuleLoadError(`field "transform.action" must be one of ${TRANSFORM_ACTIONS.join(', ')}`);
-    }
-    if (typeof target !== 'string') throw new RuleLoadError('field "transform.target" must be a string');
-    if (replacement !== undefined && typeof replacement !== 'string') {
-      throw new RuleLoadError('field "transform.replacement" must be a string');
-    }
-    if ((action === 'replace' || action === 'annotate') && replacement === undefined) {
-      throw new RuleLoadError(`[OAR-OPS-13] field "transform.replacement" is required for action ${action}`);
-    }
-    // [OAR-OPS-14] target names the whole content, or a list<map> fact carrying
-    // the spans to act on. Anything else is a load-time rejection.
-    if (target !== 'content') {
-      const fact = env.facts.get(target);
-      if (fact === undefined || fact.type !== 'list<map>') {
-        throw new RuleLoadError(
-          `[OAR-OPS-14] field "transform.target" names ${JSON.stringify(target)}, which is neither "content" nor a declared list<map> fact`,
-        );
-      }
-    }
-    const act = action as TransformSpec['action'];
-    transform = replacement === undefined ? { action: act, target } : { action: act, target, replacement };
-  } else if (transformRaw !== undefined) {
-    throw new RuleLoadError(`[OAR-DOC-22] rule ${qualified} has effect ${effect} and must not carry "transform"`);
-  }
-
-  // [OAR-CONF-3], [OAR-PROF-4] Resolve the anchor: a core anchor identifier
-  // through the profile map, any other value against the declared host anchor
-  // catalogue.
-  let resolvedAnchor: string;
-  if (isCoreAnchor(anchorRaw)) {
-    const local = env.anchors[anchorRaw];
-    if (local === undefined) {
-      throw new RuleLoadError(`[OAR-PROF-4] rule ${qualified} targets core anchor ${anchorRaw}, which this host declares unsupported`);
-    }
-    resolvedAnchor = local;
-  } else if (env.hostAnchors.has(anchorRaw)) {
-    // [OAR-PROF-5] A catalogued host-native anchor is a valid OAR document and
-    // loads; it is simply not portable.
-    resolvedAnchor = anchorRaw;
-  } else {
-    // [OAR-DOC-12], [OAR-PROF-5] Neither core nor catalogued: a load error
-    // naming the value. A misspelled anchor must not load and silently never
-    // run.
-    throw new RuleLoadError(
-      `[OAR-DOC-12] rule ${qualified} names anchor ${anchorRaw}, which is neither a core anchor nor in the declared host anchor catalogue`,
-    );
-  }
-
-  // [OAR-DOC-21], [OAR-FACT-19] Capability negotiation.
-  const requiresRaw = doc['requires'] ?? {};
-  if (!isObject(requiresRaw)) throw new RuleLoadError('field "requires" must be an object');
-  for (const key of Object.keys(requiresRaw)) {
-    if (key !== 'profiles' && key !== 'facts') {
-      throw new RuleLoadError(`field "requires" carries undefined member ${JSON.stringify(key)}`);
-    }
-  }
-  const requiresProfiles = stringList(requiresRaw['profiles'] ?? [], 'requires.profiles');
-  const requiresFacts = stringList(requiresRaw['facts'] ?? [], 'requires.facts');
-  for (const name of requiresFacts) {
-    if (!FACT_NAME_RE.test(name)) throw new RuleLoadError(`field "requires.facts" holds malformed name ${JSON.stringify(name)}`);
-  }
-
-  const reachable = new Set<string>();
-  for (const profile of requiresProfiles) {
-    if (!env.profiles.has(profile)) {
+    if (raw.includes('{{') || raw.includes('{%')) {
       throw new RuleLoadError(
-        `[OAR-FACT-19] rule ${qualified} requires capability profile ${JSON.stringify(profile)}, which this host does not provide`,
+        `hint ${id} copy member ${member} carries a binding — hint copy is static ([OAR-HINT-3])`,
       );
     }
-    const def = PROFILES[profile]!;
-    for (const name of Object.keys(def.facts)) reachable.add(name);
-    for (const name of Object.keys(def.functions)) reachable.add(name);
+    copy[member] = raw;
+    members += 1;
   }
-  for (const name of requiresFacts) {
-    if (!env.facts.has(name) && !env.functions.has(name)) {
-      throw new RuleLoadError(
-        `[OAR-FACT-19] rule ${qualified} requires fact ${JSON.stringify(name)}, which this host does not provide`,
-      );
-    }
-    reachable.add(name);
+  if (members === 0) {
+    throw new RuleLoadError(`hint ${id} carries no copy member ([OAR-HINT-2])`);
   }
 
-  const refs = new Set<string>();
-  // [OAR-FACT-11] A rule references a fact from its transform target as much as
-  // from its condition. The target is the one reference that is not part of
-  // deciding whether the rule fires, so an engine that omits it here produces a
-  // transform that rewrites nothing and reports success.
-  if (transform !== undefined && transform.target !== 'content') {
-    if (!reachable.has(transform.target)) throw new RuleLoadError(`[OAR-FACT-20] transform target ${transform.target} is outside requires`);
-    refs.add(transform.target);
-  }
-  const warnings: string[] = [];
+  return { specVersion, id, namespace, kind: 'hint', copy };
+}
 
-  // [OAR-SEL-1] A selector clause is named by a fact.
-  const selector: SelectorClause[] = [];
-  const selectorRaw = doc['selector'];
-  if (selectorRaw !== undefined) {
-    if (!isObject(selectorRaw)) throw new RuleLoadError('field "selector" must be an object');
-    for (const [factName, valuesRaw] of Object.entries(selectorRaw)) {
-      const fact = env.facts.get(factName);
-      // [OAR-SEL-3] A clause naming a fact the engine does not declare, or one
-      // whose type is neither string nor list<string>, is a load error — never a
-      // silent match and never a silent non-match.
-      if (fact === undefined) {
-        throw new RuleLoadError(
-          `[OAR-SEL-3] selector clause ${JSON.stringify(factName)} names a fact this engine does not declare`,
-        );
-      }
-      if (fact.type !== 'string' && fact.type !== 'list<string>') {
-        throw new RuleLoadError(
-          `[OAR-SEL-3] selector clause ${JSON.stringify(factName)} names a fact of type ${fact.type}, which is neither string nor list<string>`,
-        );
-      }
-      if (fact.tier !== 'core' && !reachable.has(factName)) {
-        // [OAR-FACT-20] A selector reference outside the core tier must be
-        // reached through requires.
-        throw new RuleLoadError(
-          `[OAR-FACT-20] selector clause ${JSON.stringify(factName)} is outside the core tier and the rule does not reach it through requires`,
-        );
-      }
-      const values = stringList(valuesRaw, `selector.${factName}`);
-      // [OAR-SEL-6] A clause whose value is the empty list matches nothing. The
-      // rule loads, and the engine warns.
-      if (values.length === 0) {
-        warnings.push(`selector clause ${JSON.stringify(factName)} is empty, so rule ${qualified} is never selected`);
-      }
-      refs.add(factName);
-      selector.push({ fact: factName, values });
-    }
+function resolveAnchor(id: string, on: string, profile: AnchorProfile): string {
+  if (!(CORE_ANCHORS as readonly string[]).includes(on)) {
+    // A host-native anchor. This engine models only the core set, so it has
+    // none — a rule naming one cannot be resolved here.
+    throw new RuleLoadError(`rule ${id} names anchor ${JSON.stringify(on)}, which this engine cannot resolve`);
   }
-
-  // [OAR-DOC-14] The condition, type-checked against the declared environment.
-  const whenRaw = doc['when'];
-  let when: Node | null = null;
-  if (whenRaw !== undefined) {
-    if (typeof whenRaw !== 'string') throw new RuleLoadError('field "when" must be a string');
-    let ast: Node;
-    try {
-      ast = parse(whenRaw);
-    } catch (err) {
-      throw new RuleLoadError(`rule ${qualified} condition: ${(err as Error).message}`);
-    }
-    // [OAR-EXPR-17] The declared parse-tree ceiling.
-    const nodes = countNodes(ast);
-    if (nodes > env.expressionNodesMax) {
-      throw new RuleLoadError(
-        `[OAR-EXPR-17] rule ${qualified} condition has ${nodes} parse-tree nodes, above the declared expression_nodes_max of ${env.expressionNodesMax}`,
-      );
-    }
-    let result;
-    try {
-      result = check(ast, { env, reachable });
-    } catch (err) {
-      if (err instanceof ConditionTypeError) throw new RuleLoadError(`rule ${qualified} condition: ${err.message}`);
-      throw err;
-    }
-    // [OAR-FACT-4] A rejection for a non-boolean result names the type the
-    // condition produced and the word bool.
-    if (result.type !== 'bool') {
-      throw new RuleLoadError(
-        `[OAR-FACT-4] rule ${qualified} condition produces ${result.type}, want bool`,
-      );
-    }
-    for (const name of result.refs) refs.add(name);
-    when = ast;
+  const local = profile.core[on];
+  if (local === undefined) {
+    throw new RuleLoadError(`rule ${JSON.stringify(id)} targets core anchor ${JSON.stringify(on)}, which this host does not support`);
   }
+  return local;
+}
 
-  // [OAR-FIRE-11] Collect the counter reads. The argument was already required
-  // to be a string literal by the type checker, so every reference can be
-  // resolved — and an unresolvable one reported — at load, in loadRuleSet.
-  const counterRefs: CounterRef[] = [];
-  if (when !== null) {
-    walkNodes(when, (n) => {
-      if (n.kind !== 'call') return;
-      const counter = COUNTER_READERS[n.name];
-      if (counter === undefined) return;
-      const arg = n.args[0];
-      if (arg === undefined || arg.kind !== 'string') return;
-      counterRefs.push({ fn: n.name, counter, literal: arg.value, target: resolveRef(arg.value, namespace) });
-    });
+function readSelector(id: string, raw: unknown): Selector {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new RuleLoadError(`rule ${id} selector must be an object`);
   }
-
-  // [OAR-DOC-32], [OAR-FIRE-10] counter_scope names a declared fact of type
-  // string whose value keys this rule's counters. A name the engine does not
-  // declare, a fact of another type, and a non-core fact the rule does not reach
-  // through requires are each a load-time rejection naming the fact.
-  const counterScopeRaw = doc['counter_scope'];
-  let counterScope: string | undefined;
-  if (counterScopeRaw !== undefined) {
-    if (typeof counterScopeRaw !== 'string' || !FACT_NAME_RE.test(counterScopeRaw)) {
-      throw new RuleLoadError(`field "counter_scope" must name a declared fact, got ${JSON.stringify(counterScopeRaw)}`);
+  const out: Selector = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    // [OAR-SEL-7] tools is the only clause this version defines.
+    if (key !== 'tools') {
+      throw new RuleLoadError(`rule ${id} selector carries undefined clause ${JSON.stringify(key)}`);
     }
-    const decl = env.facts.get(counterScopeRaw);
-    if (decl === undefined) {
-      throw new RuleLoadError(
-        `[OAR-FIRE-10] rule ${qualified} names counter_scope ${counterScopeRaw}, which this engine does not declare`,
-      );
+    if (!Array.isArray(value) || value.length === 0 || !value.every((v) => typeof v === 'string' && v !== '')) {
+      throw new RuleLoadError(`rule ${id} selector clause "tools" must be a non-empty list of tool names`);
     }
-    if (decl.type !== 'string') {
-      throw new RuleLoadError(
-        `[OAR-FIRE-10] rule ${qualified} names counter_scope ${counterScopeRaw}, whose type is ${decl.type} and not string`,
-      );
-    }
-    if (decl.tier !== 'core' && !reachable.has(counterScopeRaw)) {
-      throw new RuleLoadError(
-        `[OAR-FIRE-10] rule ${qualified} names counter_scope ${counterScopeRaw}, which is outside the core tier and the rule does not reach it through requires`,
-      );
-    }
-    // The scope fact is observed at every occurrence at which the rule's
-    // counters move, so it is a name the rule references for the purposes of
-    // fact production and of the [OAR-PROF-8] portability report.
-    refs.add(counterScopeRaw);
-    counterScope = counterScopeRaw;
+    out.tools = value as string[];
   }
+  return out;
+}
 
-  // [OAR-COPY-2], [OAR-COPY-3], [OAR-COPY-4], [OAR-COPY-5] Copy bindings are
-  // fact references: unknown names, illegal constructs, and non-interpolatable
-  // types are load failures, and a non-core name must be reached through requires.
-  for (const [member, text] of Object.entries(copy)) {
-    let bindings;
-    try {
-      bindings = parseCopy(text);
-    } catch (err) {
-      if (err instanceof CopyLoadError) {
-        throw new RuleLoadError(
-          `[OAR-COPY-3] rule ${qualified} copy.${member} carries construct ${err.message}`,
-        );
-      }
-      throw err;
-    }
-    for (const binding of bindings) {
-      const decl = env.facts.get(binding.name);
-      if (decl === undefined) {
-        throw new RuleLoadError(
-          `[OAR-COPY-2] rule ${qualified} copy.${member} names ${binding.name}, which this engine does not declare`,
-        );
-      }
-      if (binding.interpolate && !INTERPOLATABLE.has(decl.type)) {
-        throw new RuleLoadError(
-          `[OAR-COPY-4] rule ${qualified} copy.${member} interpolates ${binding.name}, whose type is ${decl.type}`,
-        );
-      }
-      if (decl.tier !== 'core' && !reachable.has(binding.name)) {
-        throw new RuleLoadError(
-          `[OAR-FACT-20] copy names ${binding.name}, which is outside the core tier and the rule does not reach it through requires`,
-        );
-      }
-      refs.add(binding.name);
-    }
+function requireString(d: Record<string, unknown>, key: string): string {
+  const v = d[key];
+  if (typeof v !== 'string' || v.trim() === '') {
+    throw new RuleLoadError(`rule document is missing required field ${JSON.stringify(key)}`);
   }
+  return v;
+}
 
-  // [OAR-DOC-15], [OAR-FACT-13], [OAR-PROF-3] flow against the declared window.
-  const flowRaw = doc['flow'];
-  let flow: string[] = [];
-  const hasFlow = flowRaw !== undefined;
-  if (hasFlow) {
-    flow = stringList(flowRaw, 'flow');
-    // [OAR-DOC-15] A present flow is non-empty: a vacuous match and an
-    // impossible match are both defensible readings of [], so it does not load.
-    if (flow.length === 0) {
-      throw new RuleLoadError(`[OAR-DOC-15] rule ${qualified} carries an empty flow, which has no defined meaning`);
-    }
-    if (env.activityWindow === 0) {
-      throw new RuleLoadError(
-        `[OAR-PROF-3] rule ${qualified} carries flow, and this host declares activity_window 0`,
-      );
-    }
-    if (flow.length > env.activityWindow) {
-      throw new RuleLoadError(
-        `[OAR-FACT-13] rule ${qualified} carries a flow of ${flow.length} steps, above the declared activity_window of ${env.activityWindow}`,
-      );
-    }
-  }
+function asArray(v: unknown): unknown[] {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) return [v];
+  return v;
+}
 
-  return {
-    id,
-    namespace,
-    qualified,
-    kind: kind as Kind,
-    anchor: anchorRaw,
-    resolvedAnchor,
-    selector,
-    ...(typeof whenRaw === 'string' ? { whenSource: whenRaw } : {}),
-    when,
-    flow,
-    hasFlow,
-    effect: effect as Effect,
-    enforcement,
-    mandatory: mandatoryRaw,
-    onError: onErrorRaw,
-    onFire,
-    ...(counterScope !== undefined ? { counterScope } : {}),
-    counterRefs,
-    overrides,
-    requiresProfiles,
-    requiresFacts,
-    ...(transform ? { transform } : {}),
-    ...(detectorRef ? { detectorRef } : {}),
-    copy,
-    status: statusRaw,
-    related,
-    refs,
-    warnings,
+// ---------------------------------------------------------------- type check
+
+const NUMERIC: readonly CelType[] = ['int', 'double'];
+const INT64_MAX = 2n ** 63n - 1n;
+
+/** Walk the AST against the declared environment, before any evaluation. */
+export function checkType(node: Node, env: Environment, ruleID: string): CelType {
+  const fail = (msg: string): never => {
+    throw new RuleLoadError(`rule ${ruleID}: ${msg}`);
   };
+  switch (node.kind) {
+    case 'bool': return 'bool';
+    case 'int':
+      // [OAR-EXPR-15] An int literal fits a signed 64-bit integer.
+      if (node.value > INT64_MAX) return fail(`int literal ${node.value} does not fit 64 bits [OAR-EXPR-15]`);
+      return 'int';
+    case 'double':
+      if (!Number.isFinite(node.value)) return fail('double literal is not finite [OAR-EXPR-15]');
+      return 'double';
+    case 'string': return 'string';
+    case 'list': {
+      // [OAR-EXPR-7] A list literal is a non-empty list<string>.
+      if (node.items.length === 0) return fail('empty list literal: its type cannot be inferred [OAR-EXPR-7]');
+      for (const item of node.items) {
+        const t = checkType(item, env, ruleID);
+        if (t !== 'string') return fail(`list literal member is ${t}, want string [OAR-EXPR-7]`);
+      }
+      return 'list<string>';
+    }
+    case 'ident': {
+      // [OAR-EXPR-2] A declared name is a fact; otherwise the last name selects
+      // a member, typed string, of the map fact the rest names.
+      const decl = env.facts[node.name];
+      if (decl) return decl.type;
+      const at = node.name.lastIndexOf('.');
+      const target = at > 0 ? env.facts[node.name.slice(0, at)] : undefined;
+      if (!target) {
+        return fail(`condition references ${JSON.stringify(node.name)}, which is not a declared fact [OAR-EXPR-2]`);
+      }
+      if (target.type !== 'map<string, dyn>') {
+        return fail(`condition selects a member of ${node.name.slice(0, at)}, which is ${target.type}, not a map<string, dyn> [OAR-EXPR-2]`);
+      }
+      return 'string';
+    }
+    case 'call': {
+      if (BUILTINS.has(node.name)) return checkBuiltin(node.name, node.args, env, ruleID, fail);
+      const fn = env.functions[node.name];
+      if (!fn) {
+        return fail(`condition calls ${JSON.stringify(node.name)}, which is not a declared observation function [OAR-EXPR-16]`);
+      }
+      if (COUNTER_FUNCTIONS.has(node.name) && node.args[0]?.kind !== 'string') {
+        return fail(`${node.name} takes a string literal naming a rule [OAR-FIRE-6]`);
+      }
+      if (node.args.length !== 1) {
+        return fail(`observation function ${node.name} takes one argument, got ${node.args.length} [OAR-EXPR-16]`);
+      }
+      const argType = checkType(node.args[0]!, env, ruleID);
+      if (argType !== fn.arg) {
+        return fail(`observation function ${node.name} takes ${fn.arg}, got ${argType} [OAR-EXPR-16]`);
+      }
+      return fn.returns;
+    }
+    case 'unary': {
+      // [OAR-EXPR-15] -9223372036854775808 is the least int, written as unary
+      // minus over a literal one past INT64_MAX.
+      if (node.op === '-' && node.operand.kind === 'int' && node.operand.value === INT64_MAX + 1n) return 'int';
+      const t = checkType(node.operand, env, ruleID);
+      if (node.op === '!') {
+        if (t !== 'bool') return fail(`! applied to ${t} [OAR-EXPR-8]`);
+        return 'bool';
+      }
+      if (!NUMERIC.includes(t)) return fail(`unary - applied to ${t} [OAR-EXPR-9]`);
+      return t;
+    }
+    case 'ternary': {
+      const c = checkType(node.cond, env, ruleID);
+      if (c !== 'bool') return fail(`ternary condition is ${c}, want bool [OAR-EXPR-8]`);
+      const a = checkType(node.then, env, ruleID);
+      const b = checkType(node.other, env, ruleID);
+      if (a !== b) return fail(`ternary arms are ${a} and ${b} [OAR-EXPR-8]`);
+      return a;
+    }
+    case 'binary':
+      return checkBinary(node.op, node.left, node.right, env, ruleID, fail);
+  }
 }
 
-export interface RuleSet {
-  readonly rules: readonly LoadedRule[];
-  /** Qualified identifier to the rule carrying it. */
-  readonly byId: ReadonlyMap<string, LoadedRule>;
-  /** Qualified identifier to the qualified identifiers it suppresses. */
-  readonly suppresses: ReadonlyMap<string, readonly string[]>;
-  /** Qualified identifier to the rule substituted when it cannot be evaluated. */
-  readonly errorSubstitute: ReadonlyMap<string, string>;
-  readonly warnings: readonly string[];
+function checkBinary(
+  op: BinaryOp,
+  leftNode: Node,
+  rightNode: Node,
+  env: Environment,
+  ruleID: string,
+  fail: (msg: string) => never,
+): CelType {
+  const left = checkType(leftNode, env, ruleID);
+  const right = checkType(rightNode, env, ruleID);
+  switch (op) {
+    case '&&':
+    case '||':
+      if (left !== 'bool' || right !== 'bool') return fail(`${op} applied to ${left} and ${right} [OAR-EXPR-8]`);
+      return 'bool';
+    case 'in':
+      // [OAR-EXPR-12] membership in a list<string>, or key presence in a map.
+      if (left !== 'string' || (right !== 'list<string>' && right !== 'map<string, dyn>')) {
+        return fail(`in applied to ${left} and ${right} [OAR-EXPR-12]`);
+      }
+      return 'bool';
+    case '==':
+    case '!=':
+      if (left !== right) return fail(`${op} compares ${left} with ${right} [OAR-EXPR-11]`);
+      if (!SCALAR.includes(left)) return fail(`${op} compares aggregate ${left} [OAR-EXPR-11]`);
+      return 'bool';
+    case '<': case '<=': case '>': case '>=':
+      // int and double are distinct types and are not comparable without an
+      // explicit conversion, which this subset does not provide.
+      if (left !== right) return fail(`${op} compares ${left} with ${right} [OAR-EXPR-10]`);
+      if (!NUMERIC.includes(left) && left !== 'string') {
+        return fail(`${op} applied to ${left} [OAR-EXPR-10]`);
+      }
+      return 'bool';
+    case '+':
+      if (left === 'string' && right === 'string') return 'string';
+      if (left === right && NUMERIC.includes(left)) return left;
+      return fail(`+ applied to ${left} and ${right} [OAR-EXPR-9]`);
+    case '%':
+      if (left === 'int' && right === 'int') return 'int';
+      return fail(`% applied to ${left} and ${right} [OAR-EXPR-9]`);
+    case '-': case '*': case '/':
+      if (left === right && NUMERIC.includes(left)) return left;
+      return fail(`${op} applied to ${left} and ${right} [OAR-EXPR-9]`);
+  }
 }
 
-/**
- * Load a rule set: each document, then the set-level checks — duplicate
- * identities, `overrides` resolution and cycles, and `on_error` substitutions.
- */
-export function loadRuleSet(docs: readonly unknown[], env: Environment): RuleSet {
-  const rules = docs.map((doc) => loadRuleDocument(doc, env));
+const SCALAR: readonly CelType[] = ['bool', 'int', 'double', 'string'];
+const SIZED: readonly CelType[] = ['string', 'list<string>', 'list<map<string, dyn>>', 'map<string, dyn>'];
 
-  const byId = new Map<string, LoadedRule>();
-  for (const rule of rules) {
-    // [OAR-DOC-9] Two rules with the same qualified identifier are a rejection.
-    // [OAR-DOC-8] Two documents sharing an id under different namespaces are
-    // distinct rules and both load.
-    if (byId.has(rule.qualified)) {
-      throw new RuleLoadError(`[OAR-DOC-9] rule set contains two rules with qualified identifier ${rule.qualified}`);
+/** The four built-ins of [OAR-EXPR-17], checked against their signatures. */
+function checkBuiltin(
+  name: string,
+  args: readonly Node[],
+  env: Environment,
+  ruleID: string,
+  fail: (msg: string) => never,
+): CelType {
+  const types = args.map((a) => checkType(a, env, ruleID));
+  if (name === 'size') {
+    if (types.length !== 1 || !SIZED.includes(types[0]!)) {
+      return fail(`size takes one string, list, or map, got (${types.join(', ')}) [OAR-EXPR-16]`);
     }
-    byId.set(rule.qualified, rule);
+    return 'int';
   }
-
-  const suppresses = new Map<string, string[]>();
-  for (const rule of rules) {
-    const targets: string[] = [];
-    for (const ref of rule.overrides) {
-      const target = resolveRef(ref, rule.namespace);
-      const found = byId.get(target);
-      // [OAR-EVAL-13] An overrides entry that resolves to no loaded rule is a
-      // load-time rejection, naming it.
-      if (found === undefined) {
-        throw new RuleLoadError(`[OAR-EVAL-13] rule ${rule.qualified} overrides ${target}, which is not loaded`);
-      }
-      // [OAR-EVAL-17], [OAR-OPS-7] A mandatory rule cannot be suppressed.
-      if (found.mandatory) {
-        throw new RuleLoadError(`[OAR-EVAL-17] rule ${rule.qualified} overrides ${target}, whose mandatory is true`);
-      }
-      if (target === rule.qualified) {
-        throw new RuleLoadError(`overrides forms a cycle: ${rule.qualified} -> ${rule.qualified}`);
-      }
-      targets.push(target);
-    }
-    suppresses.set(rule.qualified, targets);
+  if (types.length !== 2 || types[0] !== 'string' || types[1] !== 'string') {
+    return fail(`${name} takes (string, string), got (${types.join(', ')}) [OAR-EXPR-16]`);
   }
-
-  // [OAR-EVAL-16] A suppression cycle is a load-time rejection, naming the rules
-  // in it.
-  const cycle = findCycle(suppresses);
-  if (cycle !== null) throw new RuleLoadError(`[OAR-EVAL-16] overrides forms a cycle: ${cycle.join(' -> ')}`);
-
-  // [OAR-FIRE-11] A fire_count_of or breaker_count_of argument resolving to no
-  // loaded rule is a load-time rejection, naming it. The argument was required
-  // to be a literal precisely so this check can happen here.
-  for (const rule of rules) {
-    for (const ref of rule.counterRefs) {
-      const target = byId.get(ref.target);
-      if (target === undefined) {
-        throw new RuleLoadError(
-          `[OAR-FIRE-11] rule ${rule.qualified} reads ${ref.fn}(${JSON.stringify(ref.literal)}), which resolves to ${ref.target} and is not loaded`,
-        );
-      }
-      const scope = target.counterScope;
-      if (scope !== undefined) {
-        const declaration = env.facts.get(scope)!;
-        const reached = declaration.tier === 'core' || rule.requiresFacts.includes(scope) ||
-          rule.requiresProfiles.some((profile) => Object.hasOwn(PROFILES[profile]!.facts, scope));
-        if (!reached) {
-          throw new RuleLoadError(`[OAR-FIRE-11] indirect counter_scope ${scope} is outside requires for ${rule.qualified}`);
-        }
-      }
-    }
-  }
-
-  const errorSubstitute = new Map<string, string>();
-  for (const rule of rules) {
-    if (rule.onError === 'fail_closed' || rule.onError === 'fail_open') continue;
-    const target = resolveRef(rule.onError, rule.namespace);
-    // [OAR-OPS-5] An on_error naming a rule that is not loaded is a rejection.
-    if (!byId.has(target)) {
-      throw new RuleLoadError(`[OAR-OPS-5] rule ${rule.qualified} names on_error ${target}, which is not loaded`);
-    }
-    errorSubstitute.set(rule.qualified, target);
-  }
-
-  const warnings = rules.flatMap((r) => r.warnings);
-  return { rules, byId, suppresses, errorSubstitute, warnings };
-}
-
-function findCycle(edges: ReadonlyMap<string, readonly string[]>): string[] | null {
-  const state = new Map<string, number>(); // 0 unvisited, 1 on stack, 2 done
-  const stack: string[] = [];
-  let found: string[] | null = null;
-
-  const visit = (node: string): void => {
-    if (found !== null) return;
-    const s = state.get(node) ?? 0;
-    if (s === 2) return;
-    if (s === 1) {
-      const at = stack.indexOf(node);
-      found = [...stack.slice(at), node];
-      return;
-    }
-    state.set(node, 1);
-    stack.push(node);
-    for (const next of edges.get(node) ?? []) visit(next);
-    stack.pop();
-    state.set(node, 2);
-  };
-
-  for (const node of edges.keys()) {
-    visit(node);
-    if (found !== null) return found;
-  }
-  return null;
-}
-
-/**
- * [OAR-PROF-8] A portability report: why a rule will not travel. A non-portable
- * rule is legal, so this is never a load failure.
- */
-export function portability(rule: LoadedRule, env: Environment): string[] {
-  const reasons: string[] = [];
-  if (!isCoreAnchor(rule.anchor)) reasons.push(`anchor ${rule.anchor} is host-native`);
-  for (const name of rule.refs) {
-    const decl = env.facts.get(name) ?? env.functions.get(name);
-    if (decl === undefined) continue;
-    if (decl.tier === 'host') reasons.push(`fact ${name} is host-tier`);
-  }
-  if (rule.flow.length > 0) reasons.push(`flow of ${rule.flow.length} steps needs an activity window at least that large`);
-  return reasons;
+  return 'bool';
 }
